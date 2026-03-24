@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portfolio Editor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      min-height: 100vh;
+      padding-bottom: 32px;
+    }
+
+    /* ---- header ---- */
+    header {
+      position: sticky; top: 0; z-index: 200;
+      background: #161b22; border-bottom: 1px solid #30363d;
+      padding: 12px 24px;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    header h1 { font-size: 17px; font-weight: 700; color: #e6edf3; }
+    .header-meta { font-size: 12px; color: #8b949e; margin-top: 2px; }
+
+    /* ---- add bar ---- */
+    .add-bar {
+      padding: 12px 24px;
+      background: #161b22; border-bottom: 1px solid #30363d;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .search-wrap { position: relative; flex: 1; max-width: 380px; }
+    .search-input {
+      width: 100%; padding: 8px 12px;
+      background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; font-size: 13px; outline: none; transition: border-color 0.15s;
+    }
+    .search-input::placeholder { color: #484f58; }
+    .search-input:focus { border-color: #388bfd; }
+
+    .suggestions {
+      display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      z-index: 100; max-height: 260px; overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .sugg-item {
+      padding: 9px 12px; cursor: pointer;
+      border-bottom: 1px solid #21262d;
+      display: flex; align-items: baseline; gap: 8px;
+    }
+    .sugg-item:last-child { border-bottom: none; }
+    .sugg-item:hover, .sugg-item.active { background: #21262d; }
+    .sugg-sym  { font-weight: 700; font-size: 13px; color: #79c0ff; min-width: 70px; }
+    .sugg-name { font-size: 12px; color: #8b949e; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sugg-type { font-size: 10px; color: #484f58; }
+
+    .cat-select {
+      padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; font-size: 13px; outline: none; cursor: pointer; min-width: 150px;
+    }
+    .cat-select:focus { border-color: #388bfd; }
+
+    /* ---- buttons ---- */
+    .btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; transition: filter 0.15s; }
+    .btn:hover { filter: brightness(1.15); }
+    .btn-export  { background: #1f6feb; color: #fff; }
+    .btn-primary { background: #238636; color: #fff; }
+    .btn-ghost   { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+    .btn-del {
+      background: none; border: none; color: #484f58; cursor: pointer;
+      font-size: 14px; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
+    }
+    .btn-del:hover { color: #f85149; background: rgba(248,81,73,0.1); }
+
+    /* ---- portfolio ---- */
+    .portfolio { padding: 0 24px; margin-top: 16px; }
+
+    /* ---- unassigned section ---- */
+    .unassigned-section {
+      margin-bottom: 20px;
+      border: 1px dashed #30363d; border-radius: 8px;
+      padding: 10px 14px; min-height: 48px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .unassigned-section.drag-over { border-color: #388bfd; background: rgba(56,139,253,0.06); }
+    .unassigned-label { font-size: 11px; font-weight: 700; color: #484f58; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; }
+    .unassigned-empty { font-size: 12px; color: #30363d; text-align: center; padding: 6px 0; }
+
+    /* ---- category section ---- */
+    .cat-section { margin-bottom: 4px; border-radius: 6px; transition: background 0.15s; }
+    .cat-section.drag-over { background: rgba(56,139,253,0.06); }
+    .cat-section.drag-over .cat-header { border-bottom-color: #388bfd; }
+    .cat-section.cat-insert-before { border-top: 2px solid #388bfd; margin-top: -2px; }
+    .cat-section.cat-insert-after  { border-bottom: 2px solid #388bfd; }
+
+    .cat-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 0 6px; border-bottom: 1px solid #30363d;
+      cursor: grab;
+    }
+    .cat-header:active { cursor: grabbing; }
+    .cat-emoji { font-size: 18px; line-height: 1; }
+    .cat-name  { font-size: 15px; font-weight: 700; color: #e6edf3; }
+    .cat-count { font-size: 12px; color: #484f58; margin-left: auto; }
+    .cat-del-btn {
+      background: none; border: none; color: #484f58; cursor: pointer;
+      font-size: 12px; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
+    }
+    .cat-del-btn:hover { color: #f85149; background: rgba(248,81,73,0.1); }
+
+    /* ---- stock rows ---- */
+    .stock-row {
+      display: flex; align-items: center;
+      padding: 7px 0 7px 28px; border-bottom: 1px solid #161b22;
+      cursor: grab; border-radius: 4px; transition: background 0.1s, opacity 0.1s;
+    }
+    .stock-row:active { cursor: grabbing; }
+    .stock-row:hover { background: #161b22; }
+    .stock-row.dragging { opacity: 0.35; }
+    .stock-row.insert-before { border-top: 2px solid #388bfd !important; }
+    .stock-row.insert-after  { border-bottom: 2px solid #388bfd !important; }
+    .drag-handle { color: #30363d; font-size: 13px; margin-right: 8px; user-select: none; }
+    .stock-name   { flex: 1; font-size: 13px; color: #c9d1d9; }
+    .stock-ticker { font-size: 13px; font-weight: 700; color: #79c0ff; min-width: 100px; text-align: right; font-family: 'SF Mono', monospace; }
+    .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
+
+    /* ---- add category ---- */
+    .add-cat-bar { margin-top: 24px; }
+    .add-cat-bar input {
+      width: 100%; padding: 8px 12px;
+      background: transparent; border: none; border-bottom: 1px dashed #30363d;
+      color: #8b949e; font-size: 13px; outline: none; transition: border-color 0.15s, color 0.15s;
+    }
+    .add-cat-bar input::placeholder { color: #30363d; }
+    .add-cat-bar input:focus { border-bottom-color: #388bfd; color: #c9d1d9; }
+    .emoji-wrap { position: relative; display: block; }
+    .emoji-sugg {
+      display: none; position: absolute; bottom: calc(100% + 4px); left: 0;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      z-index: 300; max-height: 200px; overflow-y: auto; min-width: 220px;
+      box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+    }
+    .emoji-sugg-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; cursor: pointer; font-size: 13px;
+      border-bottom: 1px solid #21262d;
+    }
+    .emoji-sugg-item:last-child { border-bottom: none; }
+    .emoji-sugg-item:hover, .emoji-sugg-item.active { background: #21262d; }
+    .emoji-sugg-glyph { font-size: 18px; width: 24px; text-align: center; }
+    .emoji-sugg-name { color: #8b949e; }
+
+    /* ---- toast ---- */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      padding: 11px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      display: none; z-index: 999; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .toast.ok  { background: #238636; color: #fff; }
+    .toast.err { background: #da3633; color: #fff; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📊 Portfolio Editor</h1>
+    <div class="header-meta" id="meta"></div>
+  </div>
+  <button class="btn btn-export" onclick="exportConfig()">⬇ Export config.json</button>
+</header>
+
+<div class="add-bar">
+  <div class="search-wrap">
+    <input
+      type="text" class="search-input" id="search-input"
+      placeholder="Search ticker or company…"
+      autocomplete="off"
+    >
+    <div class="suggestions" id="suggestions"></div>
+  </div>
+</div>
+
+<div class="portfolio" id="portfolio"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+let portfolio = { stocks: [], categories: [] };
+let dragging = null;
+let insertTarget = null; // { ticker, before: bool }
+let draggingCat = null;
+let insertCatTarget = null; // { name, before: bool }
+
+const EMOJI_MAP = {
+  coin:'🪙', us:'🇺🇸', fr:'🇫🇷', zap:'⚡',
+  '1st_place_medal':'🥇', shield:'🛡️', earth_americas:'🌎',
+  chart_with_upwards_trend:'📈', moneybag:'💰', gem:'💎',
+  rocket:'🚀', bank:'🏦', factory:'🏭', oil_drum:'🛢️',
+  bar_chart:'📊', house:'🏠', pill:'💊', computer:'💻',
+  airplane:'✈️', car:'🚗', gb:'🇬🇧', de:'🇩🇪', jp:'🇯🇵',
+  cn:'🇨🇳', eu:'🇪🇺', briefcase:'💼', seedling:'🌱',
+};
+function toEmoji(code) {
+  if (!code) return '📁';
+  if ([...code].some(c => c.codePointAt(0) > 127)) return code;
+  return EMOJI_MAP[code] || code || '📁';
+}
+
+// ---- load ----
+async function load() {
+  const res = await fetch('/api/portfolio');
+  portfolio = await res.json();
+  render();
+}
+
+// ---- render ----
+function render() {
+  const sorted = [...portfolio.categories].sort((a, b) => a.order - b.order);
+  document.getElementById('meta').textContent =
+    `${portfolio.stocks.length} stocks · ${portfolio.categories.length} categories`;
+
+
+  // Portfolio HTML
+  const unassigned = portfolio.stocks.filter(s => !s.category);
+  let html = '';
+
+
+  // Category sections
+  for (const cat of sorted) {
+    const stocks = portfolio.stocks.filter(s => s.category === cat.name);
+    html += `<div class="cat-section drop-zone" data-cat="${esc(cat.name)}">
+  <div class="cat-header" draggable="true" data-drag-cat="${esc(cat.name)}">
+    <span class="drag-handle" style="font-size:14px;margin-right:4px">⠿</span>
+    <span class="cat-emoji">${toEmoji(cat.emoji)}</span>
+    <span class="cat-name">${esc(cat.name)}</span>
+    <span class="cat-count">${stocks.length}</span>
+    <button class="cat-del-btn" data-del-cat="${esc(cat.name)}">✕</button>
+  </div>
+  ${stocks.length === 0
+    ? '<div class="empty-cat">Drop stocks here</div>'
+    : stocks.map(stockRowHTML).join('')}
+</div>`;
+  }
+
+  // Add category
+  html += `<div class="add-cat-bar">
+  <div class="emoji-wrap" style="flex:1;max-width:280px">
+    <input type="text" id="ncat-input" placeholder="+ Add category  —  type : for emoji" autocomplete="off" />
+    <div class="emoji-sugg" id="emoji-sugg"></div>
+  </div>
+</div>`;
+
+  document.getElementById('portfolio').innerHTML = html;
+  bindPortfolioEvents();
+}
+
+function stockRowHTML(s) {
+  return `<div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
+  <span class="drag-handle">⠿</span>
+  <span class="stock-name">${esc(s.name)}</span>
+  <span class="stock-ticker">${esc(s.ticker)}</span>
+  <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
+</div>`;
+}
+
+// ---- event delegation for portfolio (called ONCE at init) ----
+function initPortfolioClicks() {
+  const el = document.getElementById('portfolio');
+  el.addEventListener('click', e => {
+    const delTicker = e.target.closest('[data-del-ticker]');
+    if (delTicker) { deleteStock(delTicker.dataset.delTicker); return; }
+    const delCat = e.target.closest('[data-del-cat]');
+    if (delCat) { deleteCategory(delCat.dataset.delCat); return; }
+  });
+}
+
+function bindPortfolioEvents() {
+  const el = document.getElementById('portfolio');
+
+  // Drag start/end on stock rows
+  el.querySelectorAll('.stock-row[data-ticker]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragging = row.dataset.ticker;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      dragging = null;
+      insertTarget = null;
+      row.classList.remove('dragging');
+      clearDragState();
+    });
+
+    // Drag over a row → show insert indicator
+    row.addEventListener('dragover', e => {
+      if (!dragging || draggingCat || dragging === row.dataset.ticker) return;
+      e.preventDefault();
+      e.stopPropagation(); // don't bubble to cat-section
+      const before = e.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2;
+      clearInsertIndicators();
+      row.classList.add(before ? 'insert-before' : 'insert-after');
+      insertTarget = { ticker: row.dataset.ticker, before };
+      // highlight parent section too
+      row.closest('.drop-zone')?.classList.add('drag-over');
+    });
+
+    row.addEventListener('dragleave', e => {
+      if (!row.contains(e.relatedTarget)) {
+        row.classList.remove('insert-before', 'insert-after');
+      }
+    });
+
+    // Drop on a row → reorder (and optionally change category)
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearDragState();
+      if (!dragging || !insertTarget) return;
+      const fromTicker = dragging;
+      dragging = null;
+      const it = insertTarget;
+      insertTarget = null;
+
+      const stocks = [...portfolio.stocks];
+      const fromIdx = stocks.findIndex(s => s.ticker === fromTicker);
+      const toIdx   = stocks.findIndex(s => s.ticker === it.ticker);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+
+      const targetCat = stocks[toIdx].category;
+      const [moved] = stocks.splice(fromIdx, 1);
+      moved.category = targetCat;
+      const newToIdx = stocks.findIndex(s => s.ticker === it.ticker);
+      stocks.splice(it.before ? newToIdx : newToIdx + 1, 0, moved);
+      reorderStocks(stocks);
+    });
+  });
+
+  // Category header drag (reorder categories)
+  el.querySelectorAll('.cat-header[data-drag-cat]').forEach(header => {
+    header.addEventListener('dragstart', e => {
+      draggingCat = header.dataset.dragCat;
+      header.closest('.cat-section').style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
+    });
+    header.addEventListener('dragend', () => {
+      header.closest('.cat-section').style.opacity = '';
+      draggingCat = null;
+      insertCatTarget = null;
+      clearCatInsertIndicators();
+    });
+  });
+
+  el.querySelectorAll('.cat-section').forEach(section => {
+    section.addEventListener('dragover', e => {
+      if (!draggingCat || draggingCat === section.dataset.cat) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const before = e.clientY < section.getBoundingClientRect().top + section.offsetHeight / 2;
+      clearCatInsertIndicators();
+      section.classList.add(before ? 'cat-insert-before' : 'cat-insert-after');
+      insertCatTarget = { name: section.dataset.cat, before };
+    });
+    section.addEventListener('dragleave', e => {
+      if (!section.contains(e.relatedTarget)) {
+        section.classList.remove('cat-insert-before', 'cat-insert-after');
+      }
+    });
+    section.addEventListener('drop', e => {
+      if (!draggingCat || !insertCatTarget) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearCatInsertIndicators();
+      const fromName = draggingCat;
+      draggingCat = null;
+      const it = insertCatTarget;
+      insertCatTarget = null;
+
+      const cats = [...portfolio.categories].sort((a, b) => a.order - b.order);
+      const fromIdx = cats.findIndex(c => c.name === fromName);
+      const toIdx   = cats.findIndex(c => c.name === it.name);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+      const [moved] = cats.splice(fromIdx, 1);
+      const newToIdx = cats.findIndex(c => c.name === it.name);
+      cats.splice(it.before ? newToIdx : newToIdx + 1, 0, moved);
+      cats.forEach((c, i) => { c.order = i + 1; });
+      reorderCategories(cats);
+    });
+  });
+
+  // Drop zones (cat sections) — only fires when NOT dropping on a row, and only for stock drag
+  el.querySelectorAll('.drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', e => {
+      if (!dragging || draggingCat) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clearInsertIndicators();
+      insertTarget = null;
+      zone.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', e => {
+      if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', e => {
+      if (draggingCat) return;
+      e.preventDefault();
+      clearDragState();
+      if (!dragging) return;
+      const ticker = dragging;
+      dragging = null;
+      const newCat = zone.dataset.cat;
+      const stock = portfolio.stocks.find(s => s.ticker === ticker);
+      if (stock && stock.category === newCat) return;
+      moveStock(ticker, newCat);
+    });
+  });
+}
+
+// ---- search ----
+const inp = document.getElementById('search-input');
+const sugg = document.getElementById('suggestions');
+let searchTimer = null, searchAbort = null;
+// Keyboard cursor in suggestions
+let suggItems = [], suggIdx = -1;
+
+inp.addEventListener('input', () => {
+  const q = inp.value.trim();
+  if (searchAbort) { searchAbort.abort(); searchAbort = null; }
+  clearTimeout(searchTimer);
+  suggIdx = -1;
+  if (q.length < 1) { sugg.style.display = 'none'; return; }
+  searchTimer = setTimeout(async () => {
+    const ctrl = new AbortController(); searchAbort = ctrl;
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
+      const data = await res.json();
+      const quotes = (data.quotes || []).filter(q =>
+        q.quoteType !== 'OPTION' && q.quoteType !== 'FUTURE' && q.symbol);
+      if (quotes.length === 0) {
+        sugg.innerHTML = '<div class="sugg-item" style="color:#484f58;cursor:default">No results</div>';
+        suggItems = [];
+      } else {
+        sugg.innerHTML = quotes.map(q => `<div class="sugg-item"
+          data-symbol="${esc(q.symbol)}"
+          data-name="${esc(q.shortname || q.longname || q.symbol)}">
+  <span class="sugg-sym">${esc(q.symbol)}</span>
+  <span class="sugg-name">${esc(q.shortname || q.longname || '')}</span>
+  <span class="sugg-type">${esc(q.quoteType || '')}</span>
+</div>`).join('');
+        suggItems = Array.from(sugg.querySelectorAll('.sugg-item[data-symbol]'));
+        suggItems.forEach(item => {
+          item.addEventListener('mousedown', e => {
+            e.preventDefault(); // prevent blur before click
+            pickStock(item.dataset.symbol, item.dataset.name);
+          });
+        });
+      }
+      sugg.style.display = 'block';
+    } catch (e) { if (e.name !== 'AbortError') console.error(e); }
+  }, 280);
+});
+
+inp.addEventListener('keydown', e => {
+  if (sugg.style.display === 'none') return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    suggIdx = Math.min(suggIdx + 1, suggItems.length - 1);
+    highlightSugg();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    suggIdx = Math.max(suggIdx - 1, -1);
+    highlightSugg();
+  } else if (e.key === 'Enter' && suggIdx >= 0) {
+    e.preventDefault();
+    const item = suggItems[suggIdx];
+    if (item) pickStock(item.dataset.symbol, item.dataset.name);
+  } else if (e.key === 'Escape') {
+    sugg.style.display = 'none';
+    suggIdx = -1;
+  }
+});
+
+function highlightSugg() {
+  suggItems.forEach((el, i) => el.classList.toggle('active', i === suggIdx));
+  if (suggIdx >= 0) suggItems[suggIdx].scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) {
+    sugg.style.display = 'none';
+    suggIdx = -1;
+  }
+});
+
+function pickStock(ticker, name) {
+  sugg.style.display = 'none';
+  inp.value = '';
+  suggIdx = -1;
+  const sorted = [...portfolio.categories].sort((a, b) => a.order - b.order);
+  const lastCat = sorted.length ? sorted[sorted.length - 1].name : '';
+  addStock(ticker, name, lastCat);
+}
+
+// ---- mutations ----
+async function addStock(ticker, name, category) {
+  const res = await fetch('/api/stocks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticker, name, category }),
+  });
+  if (!res.ok) { toast('err', await res.text()); return; }
+  toast('ok', category ? `${ticker} added to ${category}` : `${ticker} added — drag it to a category`);
+  await load();
+}
+
+function clearInsertIndicators() {
+  document.querySelectorAll('.insert-before, .insert-after').forEach(el => {
+    el.classList.remove('insert-before', 'insert-after');
+  });
+}
+function clearCatInsertIndicators() {
+  document.querySelectorAll('.cat-insert-before, .cat-insert-after').forEach(el => {
+    el.classList.remove('cat-insert-before', 'cat-insert-after');
+  });
+}
+function clearDragState() {
+  clearInsertIndicators();
+  clearCatInsertIndicators();
+  document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+async function reorderCategories(cats) {
+  portfolio.categories = cats;
+  render(); // optimistic
+  const res = await fetch('/api/categories', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cats),
+  });
+  if (!res.ok) { toast('err', await res.text()); await load(); }
+}
+
+async function reorderStocks(stocks) {
+  portfolio.stocks = stocks;
+  render(); // optimistic
+  const res = await fetch('/api/stocks', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(stocks),
+  });
+  if (!res.ok) { toast('err', await res.text()); await load(); }
+}
+
+async function moveStock(ticker, category) {
+  const res = await fetch(`/api/stocks/${encodeURIComponent(ticker)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category }),
+  });
+  if (!res.ok) { toast('err', await res.text()); return; }
+  await load();
+}
+
+async function deleteStock(ticker) {
+  const res = await fetch(`/api/stocks/${encodeURIComponent(ticker)}`, { method: 'DELETE' });
+  if (!res.ok) { toast('err', `Impossible de supprimer ${ticker}`); return; }
+  toast('ok', `${ticker} supprimé`);
+  await load();
+}
+
+async function createCategory() {
+  const raw = (document.getElementById('ncat-input')?.value || '').trim();
+  if (!raw) { toast('err', 'Category name is required'); return; }
+  // Extract leading emoji (non-ASCII) as the emoji field, rest as name
+  const emojiMatch = raw.match(/^([\p{Emoji}\s]+?)\s+(.+)$/u);
+  const emoji = emojiMatch ? emojiMatch[1].trim() : '';
+  const name  = emojiMatch ? emojiMatch[2].trim() : raw;
+  const res = await fetch('/api/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, emoji }),
+  });
+  if (!res.ok) { toast('err', await res.text()); return; }
+  toast('ok', `Category "${name}" created`);
+  const inp = document.getElementById('ncat-input');
+  if (inp) inp.value = '';
+  await load();
+}
+
+async function deleteCategory(name) {
+  const res = await fetch(`/api/categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!res.ok) { toast('err', await res.text()); return; }
+  toast('ok', `Category "${name}" deleted`);
+  await load();
+}
+
+function exportConfig() { window.location.href = '/api/export'; }
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function toast(type, msg) {
+  const el = document.getElementById('toast');
+  el.className = `toast ${type}`; el.textContent = msg.trim();
+  el.style.display = 'block';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { el.style.display = 'none'; }, 3500);
+}
+
+// ---- emoji autocomplete ----
+const EMOJIS = [
+  ['smile','😊'],['grin','😁'],['joy','😂'],['heart','❤️'],['fire','🔥'],
+  ['star','⭐'],['sparkles','✨'],['rocket','🚀'],['chart_up','📈'],['chart_down','📉'],
+  ['bar_chart','📊'],['moneybag','💰'],['dollar','💵'],['coin','🪙'],['gem','💎'],
+  ['bank','🏦'],['briefcase','💼'],['factory','🏭'],['house','🏠'],['computer','💻'],
+  ['phone','📱'],['globe','🌍'],['earth_americas','🌎'],['earth_asia','🌏'],
+  ['seedling','🌱'],['tree','🌳'],['sun','☀️'],['zap','⚡'],['snowflake','❄️'],
+  ['oil_drum','🛢️'],['fuel_pump','⛽'],['atom','⚛️'],['pill','💊'],['hospital','🏥'],
+  ['airplane','✈️'],['car','🚗'],['train','🚂'],['ship','🚢'],['truck','🚛'],
+  ['shield','🛡️'],['sword','⚔️'],['lock','🔒'],['key','🔑'],['hammer','🔨'],
+  ['wrench','🔧'],['gear','⚙️'],['microscope','🔬'],['telescope','🔭'],['robot','🤖'],
+  ['trophy','🏆'],['medal','🏅'],['1st_place_medal','🥇'],['2nd_place_medal','🥈'],
+  ['crown','👑'],['diamond','💎'],['crystal_ball','🔮'],['chart','📉'],
+  ['us','🇺🇸'],['fr','🇫🇷'],['gb','🇬🇧'],['de','🇩🇪'],['jp','🇯🇵'],
+  ['cn','🇨🇳'],['eu','🇪🇺'],['br','🇧🇷'],['in','🇮🇳'],['ca','🇨🇦'],
+  ['au','🇦🇺'],['ch','🇨🇭'],['se','🇸🇪'],['kr','🇰🇷'],['sg','🇸🇬'],
+  ['checkmark','✅'],['x','❌'],['warning','⚠️'],['info','ℹ️'],['question','❓'],
+  ['up_arrow','⬆️'],['down_arrow','⬇️'],['left_arrow','⬅️'],['right_arrow','➡️'],
+  ['recycle','♻️'],['infinity','♾️'],['plus','➕'],['minus','➖'],
+];
+
+let emojiSuggItems = [], emojiSuggIdx = -1;
+
+// Use event delegation since #ncat-emoji is re-created on each render
+document.getElementById('portfolio').addEventListener('input', e => {
+  if (e.target.id !== 'ncat-input') return;
+  const val = e.target.value;
+  const sugg = document.getElementById('emoji-sugg');
+  if (!sugg) return;
+
+  const m = val.match(/:([a-z0-9_]*)$/);
+  if (!m) { sugg.style.display = 'none'; emojiSuggItems = []; return; }
+
+  const q = m[1].toLowerCase();
+  const matches = q.length === 0
+    ? EMOJIS.slice(0, 24)
+    : EMOJIS.filter(([name]) => name.includes(q)).slice(0, 24);
+
+  if (matches.length === 0) { sugg.style.display = 'none'; return; }
+
+  emojiSuggIdx = -1;
+  sugg.innerHTML = matches.map(([name, glyph]) =>
+    `<div class="emoji-sugg-item" data-glyph="${glyph}" data-name="${name}">
+      <span class="emoji-sugg-glyph">${glyph}</span>
+      <span class="emoji-sugg-name">:${name}:</span>
+    </div>`
+  ).join('');
+  emojiSuggItems = Array.from(sugg.querySelectorAll('.emoji-sugg-item'));
+  emojiSuggItems.forEach(item => {
+    item.addEventListener('mousedown', ev => {
+      ev.preventDefault();
+      pickEmoji(item.dataset.glyph, e.target);
+    });
+  });
+  sugg.style.display = 'block';
+});
+
+document.getElementById('portfolio').addEventListener('keydown', e => {
+  if (e.target.id !== 'ncat-input') return;
+  const sugg = document.getElementById('emoji-sugg');
+  const open = sugg && sugg.style.display !== 'none';
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (open && emojiSuggIdx >= 0) {
+      pickEmoji(emojiSuggItems[emojiSuggIdx].dataset.glyph, e.target);
+    } else {
+      if (open) { sugg.style.display = 'none'; emojiSuggItems = []; emojiSuggIdx = -1; }
+      createCategory();
+    }
+  } else if (!open) {
+    return;
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    emojiSuggIdx = Math.min(emojiSuggIdx + 1, emojiSuggItems.length - 1);
+    emojiSuggItems.forEach((el, i) => el.classList.toggle('active', i === emojiSuggIdx));
+    emojiSuggItems[emojiSuggIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    emojiSuggIdx = Math.max(emojiSuggIdx - 1, -1);
+    emojiSuggItems.forEach((el, i) => el.classList.toggle('active', i === emojiSuggIdx));
+  } else if (e.key === 'Escape') {
+    sugg.style.display = 'none';
+    emojiSuggItems = []; emojiSuggIdx = -1;
+  }
+});
+
+function pickEmoji(glyph, input) {
+  // Replace the :query at the end with the chosen emoji
+  input.value = input.value.replace(/:([a-z0-9_]*)$/, glyph);
+  const sugg = document.getElementById('emoji-sugg');
+  if (sugg) sugg.style.display = 'none';
+  emojiSuggItems = []; emojiSuggIdx = -1;
+  input.focus();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.emoji-wrap')) {
+    const sugg = document.getElementById('emoji-sugg');
+    if (sugg) sugg.style.display = 'none';
+  }
+});
+
+initPortfolioClicks();
+load();
+</script>
+</body>
+</html>
