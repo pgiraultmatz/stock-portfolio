@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -29,26 +31,81 @@ type Category struct {
 	Order int    `json:"order"`
 }
 
-// Server holds the in-memory portfolio state and the path to config.json.
+const githubGistAPI = "https://api.github.com/gists/"
+
+// Server holds the in-memory portfolio state and the GitHub Gist config source.
 type Server struct {
-	mu         sync.RWMutex
-	configPath string
-	rawConfig  map[string]json.RawMessage // preserves all other config fields
-	stocks     []Stock
-	categories []Category
+	mu           sync.RWMutex
+	gistID       string
+	githubToken  string
+	gistFilename string
+	rawConfig    map[string]json.RawMessage // preserves all other config fields
+	stocks       []Stock
+	categories   []Category
 }
 
-func NewServer(configPath string) (*Server, error) {
-	s := &Server{configPath: configPath, rawConfig: make(map[string]json.RawMessage)}
+func NewServer() (*Server, error) {
+	gistID := os.Getenv("GIST_ID")
+	githubToken := os.Getenv("GITHUB_TOKEN")
+	if gistID == "" {
+		return nil, fmt.Errorf("GIST_ID environment variable is required")
+	}
+	if githubToken == "" {
+		return nil, fmt.Errorf("GITHUB_TOKEN environment variable is required")
+	}
+	s := &Server{
+		gistID:      gistID,
+		githubToken: githubToken,
+		rawConfig:   make(map[string]json.RawMessage),
+	}
 	return s, s.load()
 }
 
+func (s *Server) gistRequest(method, body string) (*http.Response, error) {
+	var reqBody io.Reader
+	if body != "" {
+		reqBody = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, githubGistAPI+s.gistID, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.githubToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return http.DefaultClient.Do(req)
+}
+
 func (s *Server) load() error {
-	data, err := os.ReadFile(s.configPath)
+	resp, err := s.gistRequest(http.MethodGet, "")
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(data, &s.rawConfig); err != nil {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github API returned %d", resp.StatusCode)
+	}
+
+	var gist struct {
+		Files map[string]struct {
+			Content string `json:"content"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&gist); err != nil {
+		return err
+	}
+
+	const expectedFilename = "stock-config.json"
+	f, ok := gist.Files[expectedFilename]
+	if !ok {
+		return fmt.Errorf("file %q not found in gist %s", expectedFilename, s.gistID)
+	}
+	s.gistFilename = expectedFilename
+	content := f.Content
+
+	if err := json.Unmarshal([]byte(content), &s.rawConfig); err != nil {
 		return err
 	}
 	if v, ok := s.rawConfig["stocks"]; ok {
@@ -272,17 +329,36 @@ func (s *Server) searchYahoo(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	stocksJSON, _ := json.Marshal(s.stocks)
 	catsJSON, _ := json.Marshal(s.categories)
 	s.rawConfig["stocks"] = json.RawMessage(stocksJSON)
 	s.rawConfig["categories"] = json.RawMessage(catsJSON)
 	data, _ := json.MarshalIndent(s.rawConfig, "", "  ")
-	w.Header().Set("Content-Disposition", "attachment; filename=config.json")
+
+	payload, _ := json.Marshal(map[string]any{
+		"files": map[string]any{
+			s.gistFilename: map[string]any{
+				"content": string(data),
+			},
+		},
+	})
+	resp, err := s.gistRequest(http.MethodPatch, string(payload))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		http.Error(w, fmt.Sprintf("github API returned %d: %s", resp.StatusCode, bytes.TrimSpace(body)), http.StatusBadGateway)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
 }
 
 // ---- routing ----
@@ -350,9 +426,9 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 
-	mux.HandleFunc("/api/export", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			s.exportConfig(w, r)
+	mux.HandleFunc("/api/save", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.saveConfig(w, r)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -361,18 +437,46 @@ func (s *Server) routes() http.Handler {
 	return mux
 }
 
+// loadDotEnv reads a .env file and sets variables that are not already set in the environment.
+func loadDotEnv(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // .env is optional
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		// Strip optional surrounding quotes
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+}
+
 func main() {
-	configPath := flag.String("config", "config.json", "path to config.json")
 	addr := flag.String("addr", ":8080", "listen address (e.g. :8080)")
 	flag.Parse()
 
-	srv, err := NewServer(*configPath)
+	loadDotEnv(".env")
+
+	srv, err := NewServer()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
 	log.Printf("Portfolio editor running at http://localhost%s", *addr)
-	log.Printf("Config: %s", *configPath)
+	log.Printf("Gist: https://gist.github.com/%s", srv.gistID)
 	if err := http.ListenAndServe(*addr, srv.routes()); err != nil {
 		log.Fatal(err)
 	}

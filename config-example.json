@@ -1,0 +1,32 @@
+{
+  "stocks": [
+    { "ticker": "NVDA", "name": "NVIDIA", "category": "USA" },
+    { "ticker": "AAPL", "name": "Apple Inc", "category": "USA" },
+    { "ticker": "BTC-USD", "name": "Bitcoin", "category": "Crypto" },
+    { "ticker": "MC.PA", "name": "LVMH", "category": "France" }
+  ],
+  "categories": [
+    { "name": "USA", "emoji": "us", "order": 1 },
+    { "name": "Crypto", "emoji": "coin", "order": 2 },
+    { "name": "France", "emoji": "fr", "order": 3 }
+  ],
+  "yahoo_api": {
+    "base_url": "https://query1.finance.yahoo.com/v8/finance/chart",
+    "range": "1y",
+    "interval": "1wk",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "timeout_seconds": 30
+  },
+  "ai": {
+    "enabled": false,
+    "provider": "gemini",
+    "model": "gemini-2.0-flash",
+    "max_tokens": 2000
+  },
+  "alerts": {
+    "enabled": false,
+    "thresholds": [3.0, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0],
+    "state_path": ".alert-state.json"
+  },
+  "concurrency": 10
+}

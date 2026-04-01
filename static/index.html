@@ -170,7 +170,7 @@
     <h1>📊 Portfolio Editor</h1>
     <div class="header-meta" id="meta"></div>
   </div>
-  <button class="btn btn-export" onclick="exportConfig()">⬇ Export config.json</button>
+  <button class="btn btn-export" onclick="saveToGist()">☁ Save to Gist</button>
 </header>
 
 <div class="add-bar">
@@ -597,7 +597,11 @@ async function deleteCategory(name) {
   await load();
 }
 
-function exportConfig() { window.location.href = '/api/export'; }
+async function saveToGist() {
+  const res = await fetch('/api/save', { method: 'POST' });
+  if (!res.ok) { toast('err', await res.text()); return; }
+  toast('ok', 'Saved to Gist');
+}
 
 function esc(s) {
   if (!s) return '';
