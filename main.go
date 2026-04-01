@@ -46,12 +46,12 @@ type Server struct {
 
 func NewServer() (*Server, error) {
 	gistID := os.Getenv("GIST_ID")
-	githubToken := os.Getenv("GITHUB_TOKEN")
+	githubToken := os.Getenv("GH_TOKEN")
 	if gistID == "" {
 		return nil, fmt.Errorf("GIST_ID environment variable is required")
 	}
 	if githubToken == "" {
-		return nil, fmt.Errorf("GITHUB_TOKEN environment variable is required")
+		return nil, fmt.Errorf("GH_TOKEN environment variable is required")
 	}
 	s := &Server{
 		gistID:      gistID,

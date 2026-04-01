@@ -31,11 +31,11 @@ Create a `.env` file at the root of the project:
 
 ```
 GIST_ID=<your-gist-id>
-GITHUB_TOKEN=<your-github-token>
+GH_TOKEN=<your-github-token>
 ```
 
 - **`GIST_ID`** — the ID copied from your Gist URL in step 1
-- **`GITHUB_TOKEN`** — a [GitHub personal access token](https://github.com/settings/tokens) with the `gist` scope (classic token) or `Gists: read/write` permission (fine-grained token)
+- **`GH_TOKEN`** — a [GitHub personal access token](https://github.com/settings/tokens) with the `gist` scope (classic token) or `Gists: read/write` permission (fine-grained token)
 
 > `.env` is listed in `.gitignore` and will never be committed.
 
@@ -54,7 +54,7 @@ Then open http://localhost:8080 in your browser.
 Environment variables set in the shell always take precedence over the `.env` file:
 
 ```bash
-GITHUB_TOKEN=ghp_xxx go run main.go
+GH_TOKEN=ghp_xxx go run main.go
 ```
 
 ## Options
