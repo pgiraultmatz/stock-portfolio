@@ -1,9 +1,12 @@
 package main
 
 import (
-	"bytes"
+	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +17,11 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 //go:embed static
@@ -31,106 +39,197 @@ type Category struct {
 	Order int    `json:"order"`
 }
 
-const githubGistAPI = "https://api.github.com/gists/"
+type contextKey string
 
-// Server holds the in-memory portfolio state and the GitHub Gist config source.
+const ctxUserID   contextKey = "userID"
+const ctxUser     contextKey = "user"
+
 type Server struct {
-	mu           sync.RWMutex
-	gistID       string
-	githubToken  string
-	gistFilename string
-	rawConfig    map[string]json.RawMessage // preserves all other config fields
-	stocks       []Stock
-	categories   []Category
+	store         Store
+	googleOAuth   *oauth2.Config
+	secureCookies bool
+	pendingStates sync.Map
+	mailer        Mailer
+	baseURL       string
 }
 
-func NewServer() (*Server, error) {
-	gistID := os.Getenv("GIST_ID")
-	githubToken := os.Getenv("GH_TOKEN")
-	if gistID == "" {
-		return nil, fmt.Errorf("GIST_ID environment variable is required")
+func NewServer(ctx context.Context) (*Server, error) {
+	region := os.Getenv("AWS_REGION")
+	if region == "" {
+		region = "us-east-1"
 	}
-	if githubToken == "" {
-		return nil, fmt.Errorf("GH_TOKEN environment variable is required")
+	table := os.Getenv("DYNAMODB_TABLE")
+	if table == "" {
+		table = "stock-portfolio"
 	}
-	s := &Server{
-		gistID:      gistID,
-		githubToken: githubToken,
-		rawConfig:   make(map[string]json.RawMessage),
-	}
-	return s, s.load()
-}
+	endpoint := os.Getenv("DYNAMODB_ENDPOINT")
 
-func (s *Server) gistRequest(method, body string) (*http.Response, error) {
-	var reqBody io.Reader
-	if body != "" {
-		reqBody = strings.NewReader(body)
-	}
-	req, err := http.NewRequest(method, githubGistAPI+s.gistID, reqBody)
+	store, err := NewDynamoStore(ctx, endpoint, region, table)
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.githubToken)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	return http.DefaultClient.Do(req)
-}
-
-func (s *Server) load() error {
-	resp, err := s.gistRequest(http.MethodGet, "")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("github API returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("init store: %w", err)
 	}
 
-	var gist struct {
-		Files map[string]struct {
-			Content string `json:"content"`
-		} `json:"files"`
+	s := &Server{store: store}
+
+	baseURL := os.Getenv("APP_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&gist); err != nil {
-		return err
+	s.baseURL = baseURL
+	s.secureCookies = strings.HasPrefix(baseURL, "https://")
+
+	gmailFrom := os.Getenv("GMAIL_FROM")
+	gmailPassword := os.Getenv("GMAIL_APP_PASSWORD")
+	if gmailFrom != "" && gmailPassword != "" {
+		s.mailer = NewGmailMailer(gmailFrom, gmailPassword)
+	} else {
+		s.mailer = &LogMailer{}
 	}
 
-	const expectedFilename = "stock-config.json"
-	f, ok := gist.Files[expectedFilename]
-	if !ok {
-		return fmt.Errorf("file %q not found in gist %s", expectedFilename, s.gistID)
-	}
-	s.gistFilename = expectedFilename
-	content := f.Content
-
-	if err := json.Unmarshal([]byte(content), &s.rawConfig); err != nil {
-		return err
-	}
-	if v, ok := s.rawConfig["stocks"]; ok {
-		if err := json.Unmarshal(v, &s.stocks); err != nil {
-			return err
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+	if clientID != "" && clientSecret != "" {
+		s.googleOAuth = &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RedirectURL:  baseURL + "/auth/google/callback",
+			Scopes: []string{
+				"https://www.googleapis.com/auth/userinfo.email",
+				"https://www.googleapis.com/auth/userinfo.profile",
+			},
+			Endpoint: google.Endpoint,
 		}
 	}
-	if v, ok := s.rawConfig["categories"]; ok {
-		if err := json.Unmarshal(v, &s.categories); err != nil {
-			return err
-		}
-	}
-	return nil
+
+	return s, nil
 }
 
-// ---- handlers ----
+// ---- auth middleware ----
 
-func (s *Server) getPortfolio(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := s.getSession(r)
+		if !ok {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			http.Redirect(w, r, "/auth/login", http.StatusFound)
+			return
+		}
+
+		user, err := s.store.GetUserByID(r.Context(), userID)
+		if err != nil || !user.Verified {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.Error(w, "email not verified", http.StatusForbidden)
+				return
+			}
+			if cookie, err := r.Cookie("session"); err == nil {
+				s.store.DeleteSession(r.Context(), cookie.Value)
+			}
+			http.SetCookie(w, &http.Cookie{
+				Name: "session", Value: "", Path: "/",
+				Expires: time.Unix(0, 0), MaxAge: -1,
+			})
+			http.Redirect(w, r, "/auth/login", http.StatusFound)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), ctxUserID, userID)
+		ctx = context.WithValue(ctx, ctxUser, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func userIDFromCtx(r *http.Request) string {
+	v, _ := r.Context().Value(ctxUserID).(string)
+	return v
+}
+
+func userFromCtx(r *http.Request) *User {
+	v, _ := r.Context().Value(ctxUser).(*User)
+	return v
+}
+
+// ---- user profile handlers ----
+
+func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"stocks":     s.stocks,
-		"categories": s.categories,
+		"id":          u.ID,
+		"email":       u.Email,
+		"displayName": u.DisplayName,
+		"hasPassword": u.PasswordHash != "",
 	})
+}
+
+func (s *Server) deleteMe(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r)
+	if cookie, err := r.Cookie("session"); err == nil {
+		s.store.DeleteSession(r.Context(), cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: "session", Value: "", Path: "/",
+		Expires: time.Unix(0, 0), MaxAge: -1,
+	})
+	if err := s.store.DeleteUser(r.Context(), u); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent) // frontend handles redirect
+}
+
+func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
+	u := userFromCtx(r)
+	var body struct {
+		DisplayName string `json:"displayName"`
+		Password    string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(body.DisplayName)
+	if name == "" {
+		name = u.DisplayName
+	}
+	hash := u.PasswordHash
+	if body.Password != "" {
+		if len(body.Password) < 8 {
+			http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		b, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		hash = string(b)
+	}
+	if err := s.store.UpdateUser(r.Context(), u.ID, name, hash); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- portfolio handlers ----
+
+func (s *Server) getPortfolio(w http.ResponseWriter, r *http.Request) {
+	stocks, cats, err := s.store.GetPortfolio(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if stocks == nil {
+		stocks = []Stock{}
+	}
+	if cats == nil {
+		cats = []Category{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"stocks": stocks, "categories": cats})
 }
 
 func (s *Server) postStock(w http.ResponseWriter, r *http.Request) {
@@ -147,30 +246,17 @@ func (s *Server) postStock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, existing := range s.stocks {
-		if strings.EqualFold(existing.Ticker, st.Ticker) {
+	if err := s.store.PutStock(r.Context(), userIDFromCtx(r), st); err != nil {
+		if errors.Is(err, ErrConflict) {
 			http.Error(w, "ticker already exists", http.StatusConflict)
 			return
 		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	s.stocks = append(s.stocks, st)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(st)
-}
-
-func (s *Server) putCategories(w http.ResponseWriter, r *http.Request) {
-	var cats []Category
-	if err := json.NewDecoder(r.Body).Decode(&cats); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.categories = cats
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) putStocks(w http.ResponseWriter, r *http.Request) {
@@ -179,9 +265,10 @@ func (s *Server) putStocks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stocks = stocks
+	if err := s.store.ReplaceStocks(r.Context(), userIDFromCtx(r), stocks); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -199,19 +286,13 @@ func (s *Server) patchStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	found := false
-	for i, st := range s.stocks {
-		if strings.EqualFold(st.Ticker, ticker) {
-			s.stocks[i].Category = strings.TrimSpace(body.Category)
-			found = true
-			break
+	err := s.store.UpdateStockCategory(r.Context(), userIDFromCtx(r), ticker, strings.TrimSpace(body.Category))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
 		}
-	}
-	if !found {
-		http.Error(w, "not found", http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -224,23 +305,14 @@ func (s *Server) deleteStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ticker required", http.StatusBadRequest)
 		return
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	newStocks := make([]Stock, 0, len(s.stocks))
-	found := false
-	for _, st := range s.stocks {
-		if strings.EqualFold(st.Ticker, ticker) {
-			found = true
-			continue
+	if err := s.store.DeleteStock(r.Context(), userIDFromCtx(r), ticker); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
 		}
-		newStocks = append(newStocks, st)
-	}
-	if !found {
-		http.Error(w, "not found", http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.stocks = newStocks
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -257,25 +329,43 @@ func (s *Server) postCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, c := range s.categories {
-		if strings.EqualFold(c.Name, cat.Name) {
-			http.Error(w, "category already exists", http.StatusConflict)
-			return
-		}
+	_, cats, err := s.store.GetPortfolio(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	maxOrder := 0
-	for _, c := range s.categories {
+	for _, c := range cats {
 		if c.Order > maxOrder {
 			maxOrder = c.Order
 		}
 	}
 	cat.Order = maxOrder + 1
-	s.categories = append(s.categories, cat)
+
+	if err := s.store.PutCategory(r.Context(), userIDFromCtx(r), cat); err != nil {
+		if errors.Is(err, ErrConflict) {
+			http.Error(w, "category already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(cat)
+}
+
+func (s *Server) putCategories(w http.ResponseWriter, r *http.Request) {
+	var cats []Category
+	if err := json.NewDecoder(r.Body).Decode(&cats); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.store.ReplaceCategories(r.Context(), userIDFromCtx(r), cats); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) deleteCategory(w http.ResponseWriter, r *http.Request) {
@@ -285,23 +375,14 @@ func (s *Server) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "category name required", http.StatusBadRequest)
 		return
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	newCats := make([]Category, 0, len(s.categories))
-	found := false
-	for _, c := range s.categories {
-		if c.Name == name {
-			found = true
-			continue
+	if err := s.store.DeleteCategory(r.Context(), userIDFromCtx(r), name); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
 		}
-		newCats = append(newCats, c)
-	}
-	if !found {
-		http.Error(w, "not found", http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.categories = newCats
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -330,33 +411,7 @@ func (s *Server) searchYahoo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	stocksJSON, _ := json.Marshal(s.stocks)
-	catsJSON, _ := json.Marshal(s.categories)
-	s.rawConfig["stocks"] = json.RawMessage(stocksJSON)
-	s.rawConfig["categories"] = json.RawMessage(catsJSON)
-	data, _ := json.MarshalIndent(s.rawConfig, "", "  ")
-
-	payload, _ := json.Marshal(map[string]any{
-		"files": map[string]any{
-			s.gistFilename: map[string]any{
-				"content": string(data),
-			},
-		},
-	})
-	resp, err := s.gistRequest(http.MethodPatch, string(payload))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		http.Error(w, fmt.Sprintf("github API returned %d: %s", resp.StatusCode, bytes.TrimSpace(body)), http.StatusBadGateway)
-		return
-	}
+	// Portfolio is persisted immediately on every write — nothing to do.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
 }
@@ -366,18 +421,44 @@ func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	staticFS, _ := fs.Sub(staticFiles, "static")
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	// Public auth routes
+	mux.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.authLoginPost(w, r)
+		} else {
+			s.authLoginPage(w, r)
+		}
+	})
+	mux.HandleFunc("/auth/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.authRegisterPost(w, r)
+		} else {
+			s.authLoginPage(w, r) // same page, handled via JS tab
+		}
+	})
+	mux.HandleFunc("/account/deleted", func(w http.ResponseWriter, r *http.Request) {
+		data, _ := staticFiles.ReadFile("static/deleted.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+	})
+	mux.HandleFunc("/auth/google", s.authGoogleLogin)
+	mux.HandleFunc("/auth/google/callback", s.authGoogleCallback)
+	mux.HandleFunc("/auth/verify", s.authVerify)
+	mux.HandleFunc("/auth/logout", s.authLogout)
 
-	mux.HandleFunc("/api/portfolio", func(w http.ResponseWriter, r *http.Request) {
+	// Protected routes
+	staticFS, _ := fs.Sub(staticFiles, "static")
+	protected := http.NewServeMux()
+	protected.Handle("/", http.FileServer(http.FS(staticFS)))
+
+	protected.HandleFunc("/api/portfolio", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.getPortfolio(w, r)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
-	mux.HandleFunc("/api/stocks/", func(w http.ResponseWriter, r *http.Request) {
+	protected.HandleFunc("/api/stocks/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodDelete:
 			s.deleteStock(w, r)
@@ -387,8 +468,7 @@ func (s *Server) routes() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
-	mux.HandleFunc("/api/stocks", func(w http.ResponseWriter, r *http.Request) {
+	protected.HandleFunc("/api/stocks", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			s.postStock(w, r)
@@ -398,16 +478,14 @@ func (s *Server) routes() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
-	mux.HandleFunc("/api/categories/", func(w http.ResponseWriter, r *http.Request) {
+	protected.HandleFunc("/api/categories/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			s.deleteCategory(w, r)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
-	mux.HandleFunc("/api/categories", func(w http.ResponseWriter, r *http.Request) {
+	protected.HandleFunc("/api/categories", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			s.postCategory(w, r)
@@ -417,16 +495,26 @@ func (s *Server) routes() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
-	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+	protected.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getMe(w, r)
+		case http.MethodPatch:
+			s.updateMe(w, r)
+		case http.MethodDelete:
+			s.deleteMe(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	protected.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.searchYahoo(w, r)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
-	mux.HandleFunc("/api/save", func(w http.ResponseWriter, r *http.Request) {
+	protected.HandleFunc("/api/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			s.saveConfig(w, r)
 		} else {
@@ -434,14 +522,22 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 
+	mux.Handle("/", s.requireAuth(protected))
 	return mux
 }
 
-// loadDotEnv reads a .env file and sets variables that are not already set in the environment.
+// ---- misc ----
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func loadDotEnv(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return // .env is optional
+		return
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -454,7 +550,6 @@ func loadDotEnv(path string) {
 		}
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
-		// Strip optional surrounding quotes
 		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
 			value = value[1 : len(value)-1]
 		}
@@ -465,19 +560,29 @@ func loadDotEnv(path string) {
 }
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address (e.g. :8080)")
+	addr := flag.String("addr", ":8080", "listen address")
 	flag.Parse()
 
 	loadDotEnv(".env")
 
-	srv, err := NewServer()
+	ctx := context.Background()
+	srv, err := NewServer(ctx)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		log.Fatalf("failed to start server: %v", err)
 	}
 
 	log.Printf("Portfolio editor running at http://localhost%s", *addr)
-	log.Printf("Gist: https://gist.github.com/%s", srv.gistID)
+	endpoint := os.Getenv("DYNAMODB_ENDPOINT")
+	if endpoint != "" {
+		log.Printf("DynamoDB: %s (local)", endpoint)
+	} else {
+		log.Printf("DynamoDB: table=%s region=%s", os.Getenv("DYNAMODB_TABLE"), os.Getenv("AWS_REGION"))
+	}
+
 	if err := http.ListenAndServe(*addr, srv.routes()); err != nil {
 		log.Fatal(err)
 	}
 }
+
+// keep time import used (via time.Time in auth.go — it's in same package)
+var _ = time.Now

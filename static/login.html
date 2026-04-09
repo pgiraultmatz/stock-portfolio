@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portfolio Editor — Sign in</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .logo h1 { font-size: 20px; font-weight: 700; color: #e6edf3; }
+    .logo p  { font-size: 13px; color: #8b949e; margin-top: 4px; }
+
+    /* tabs */
+    .tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 1px solid #30363d; }
+    .tab {
+      flex: 1; text-align: center; padding: 8px 0;
+      font-size: 13px; font-weight: 600; color: #8b949e;
+      cursor: pointer; border-bottom: 2px solid transparent;
+      margin-bottom: -1px; transition: color 0.15s, border-color 0.15s;
+    }
+    .tab.active { color: #e6edf3; border-color: #388bfd; }
+
+    /* panels */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* google button */
+    .btn-google {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      width: 100%; padding: 10px 16px;
+      background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+      color: #e6edf3; font-size: 13px; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn-google:hover { background: #2d333b; border-color: #484f58; }
+    .btn-google svg { flex-shrink: 0; }
+
+    .divider {
+      display: flex; align-items: center; gap: 12px;
+      margin: 20px 0; color: #484f58; font-size: 12px;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: #30363d;
+    }
+
+    /* form */
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: #8b949e; margin-bottom: 5px; }
+    input[type=email], input[type=password], input[type=text] {
+      width: 100%; padding: 8px 12px;
+      background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; font-size: 13px; outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #388bfd; }
+
+    .btn-submit {
+      width: 100%; padding: 9px 16px; margin-top: 6px;
+      background: #238636; border: none; border-radius: 6px;
+      color: #fff; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: filter 0.15s;
+    }
+    .btn-submit:hover { filter: brightness(1.15); }
+
+    .error {
+      background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.3);
+      border-radius: 6px; padding: 10px 12px;
+      color: #f85149; font-size: 12px; margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>Portfolio Editor</h1>
+    <p>Sign in to manage your portfolio</p>
+  </div>
+
+  <div id="error-box" class="error" style="display:none"></div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('login')">Sign in</div>
+    <div class="tab" onclick="switchTab('register')">Create account</div>
+  </div>
+
+  <!-- Login panel -->
+  <div id="panel-login" class="panel active">
+    <a href="/auth/google" class="btn-google" id="google-btn">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332Z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58Z"/></svg>
+      Continue with Google
+    </a>
+
+    <div class="divider">or</div>
+
+    <form id="login-form" onsubmit="submitLogin(event)">
+      <div class="form-group">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" name="password" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn-submit">Sign in</button>
+    </form>
+  </div>
+
+  <!-- Register panel -->
+  <div id="panel-register" class="panel">
+    <a href="/auth/google" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332Z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58Z"/></svg>
+      Continue with Google
+    </a>
+
+    <div class="divider">or</div>
+
+    <form id="register-form" onsubmit="submitRegister(event)">
+      <div class="form-group">
+        <label for="reg-name">Display name</label>
+        <input type="text" id="reg-name" name="name" placeholder="Your name" autocomplete="name">
+      </div>
+      <div class="form-group">
+        <label for="reg-email">Email</label>
+        <input type="email" id="reg-email" name="email" placeholder="you@example.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="reg-password">Password <span style="color:#484f58;font-weight:400">(min. 8 chars)</span></label>
+        <input type="password" id="reg-password" name="password" placeholder="••••••••" required autocomplete="new-password" minlength="8">
+      </div>
+      <button type="submit" class="btn-submit">Create account</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Hide Google button if OAuth not configured (server sets a data attribute via meta tag check)
+  // We just let the request go through; if unconfigured the server returns 503.
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', (i === 0) === (tab === 'login'));
+    });
+    document.getElementById('panel-login').classList.toggle('active', tab === 'login');
+    document.getElementById('panel-register').classList.toggle('active', tab === 'register');
+    clearError();
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-box');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function clearError() {
+    document.getElementById('error-box').style.display = 'none';
+  }
+
+  async function submitLogin(e) {
+    e.preventDefault();
+    clearError();
+    const form = e.target;
+    const body = new URLSearchParams(new FormData(form));
+    const res = await fetch('/auth/login', { method: 'POST', body, redirect: 'follow' });
+    if (res.ok || res.redirected) {
+      window.location.href = res.url || '/';
+    } else {
+      showError(await res.text());
+    }
+  }
+
+  async function submitRegister(e) {
+    e.preventDefault();
+    clearError();
+    const form = e.target;
+    const email = form.querySelector('[name=email]').value;
+    const body = new URLSearchParams(new FormData(form));
+    const res = await fetch('/auth/register', { method: 'POST', body, redirect: 'follow' });
+    if (res.redirected) {
+      window.location.href = res.url;
+    } else if (res.ok) {
+      document.querySelector('.card').innerHTML = `
+        <div class="logo">
+          <h1>Check your inbox</h1>
+          <p>We sent a verification link to</p>
+        </div>
+        <p style="text-align:center;color:#e6edf3;font-weight:600;margin:16px 0">${email}</p>
+        <p style="text-align:center;color:#8b949e;font-size:13px">Click the link in the email to activate your account.</p>
+        <p style="text-align:center;color:#484f58;font-size:12px;margin-top:12px">Didn't receive it? Check your spam folder.</p>
+      `;
+    } else {
+      showError(await res.text());
+    }
+  }
+</script>
+</body>
+</html>
