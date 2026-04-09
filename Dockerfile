@@ -1,6 +1,6 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY . .
 RUN go build -o stock-portfolio .
 
