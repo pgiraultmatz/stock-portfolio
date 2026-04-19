@@ -39,6 +39,7 @@ type Store interface {
 	GetUserByGoogleID(ctx context.Context, googleID string) (*User, error)
 	CreateUser(ctx context.Context, u *User) error
 	VerifyUser(ctx context.Context, userID string) error
+	LinkGoogleID(ctx context.Context, userID, googleID string) error
 	UpdateUser(ctx context.Context, userID, displayName, passwordHash string) error
 	DeleteUser(ctx context.Context, u *User) error
 
@@ -517,6 +518,36 @@ func (d *DynamoStore) UpdateUser(ctx context.Context, userID, displayName, passw
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":n": &types.AttributeValueMemberS{Value: displayName},
 			":p": &types.AttributeValueMemberS{Value: passwordHash},
+		},
+	})
+	return err
+}
+
+func (d *DynamoStore) LinkGoogleID(ctx context.Context, userID, googleID string) error {
+	ref, err := attributevalue.MarshalMap(map[string]any{
+		"PK": "GOOGLE#" + googleID, "SK": "USER_REF", "UserID": userID,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = d.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{Put: &types.Put{
+				TableName:           &d.table,
+				Item:                ref,
+				ConditionExpression: aws.String("attribute_not_exists(PK)"),
+			}},
+			{Update: &types.Update{
+				TableName: &d.table,
+				Key: map[string]types.AttributeValue{
+					"PK": &types.AttributeValueMemberS{Value: "USER#" + userID},
+					"SK": &types.AttributeValueMemberS{Value: "PROFILE"},
+				},
+				UpdateExpression:    aws.String("SET GoogleID = :g"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":g": &types.AttributeValueMemberS{Value: googleID},
+				},
+			}},
 		},
 	})
 	return err

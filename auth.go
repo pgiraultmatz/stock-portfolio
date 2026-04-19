@@ -23,7 +23,8 @@ func (s *Server) authGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	state := randomHex(16)
 	s.pendingStates.Store(state, time.Now().Add(10*time.Minute))
-	http.Redirect(w, r, s.googleOAuth.AuthCodeURL(state, oauth2.AccessTypeOnline), http.StatusFound)
+	url := s.googleOAuth.AuthCodeURL(state, oauth2.AccessTypeOnline, oauth2.SetAuthURLParam("prompt", "select_account"))
+	http.Redirect(w, r, url, http.StatusFound)
 }
 
 func (s *Server) authGoogleCallback(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +65,19 @@ func (s *Server) authGoogleCallback(w http.ResponseWriter, r *http.Request) {
 			DisplayName: info.Name,
 			Verified:    true, // Google already verified the email
 		}
-		if err := s.store.CreateUser(r.Context(), user); err != nil {
+		if err := s.store.CreateUser(r.Context(), user); errors.Is(err, ErrConflict) {
+			// Email/password account already exists — link Google ID to it.
+			existing, lookupErr := s.store.GetUserByEmail(r.Context(), info.Email)
+			if lookupErr != nil {
+				http.Error(w, "failed to link account", http.StatusInternalServerError)
+				return
+			}
+			if linkErr := s.store.LinkGoogleID(r.Context(), existing.ID, info.ID); linkErr != nil {
+				http.Error(w, "failed to link google account", http.StatusInternalServerError)
+				return
+			}
+			user = existing
+		} else if err != nil {
 			http.Error(w, "failed to create user", http.StatusInternalServerError)
 			return
 		}
