@@ -1,0 +1,14 @@
+[Unit]
+Description=Stock Portfolio
+After=network.target
+
+[Service]
+User=stock-portfolio
+WorkingDirectory=/opt/stock-portfolio
+EnvironmentFile=/opt/stock-portfolio/.env
+ExecStart=/opt/stock-portfolio/stock-portfolio --addr :8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

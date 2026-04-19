@@ -1,3 +1,5 @@
 portfolio-editor
 stock-portfolio
 .env
+.env.prod
+stock-portfolio-linux
