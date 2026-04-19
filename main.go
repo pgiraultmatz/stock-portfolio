@@ -410,6 +410,106 @@ func (s *Server) searchYahoo(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
+	tickersParam := strings.TrimSpace(r.URL.Query().Get("tickers"))
+	if tickersParam == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{}"))
+		return
+	}
+
+	type quoteResult struct {
+		Price    float64 `json:"price"`
+		Change   float64 `json:"change"`
+		Currency string  `json:"currency"`
+		Stale    bool    `json:"stale"`
+	}
+	type chartMeta struct {
+		RegularMarketPrice float64 `json:"regularMarketPrice"`
+		ChartPreviousClose float64 `json:"chartPreviousClose"`
+		Currency           string  `json:"currency"`
+	}
+	type chartResp struct {
+		Chart struct {
+			Result []struct {
+				Meta      chartMeta `json:"meta"`
+				Timestamp []int64   `json:"timestamp"`
+				Indicators struct {
+					Quote []struct {
+						Open []float64 `json:"open"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+			Error *struct{ Code string } `json:"error"`
+		} `json:"chart"`
+	}
+
+	tickers := strings.Split(tickersParam, ",")
+	results := make(map[string]quoteResult, len(tickers))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, t := range tickers {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(ticker string) {
+			defer wg.Done()
+			yahooURL := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(ticker) + "?range=1d&interval=5m"
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, yahooURL, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+			req.Header.Set("Accept", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+			var cr chartResp
+			if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+				return
+			}
+			if cr.Chart.Error != nil || len(cr.Chart.Result) == 0 {
+				return
+			}
+			res := cr.Chart.Result[0]
+			currentPrice := res.Meta.RegularMarketPrice
+			refPrice := res.Meta.ChartPreviousClose
+			if refPrice == 0 && len(res.Indicators.Quote) > 0 && len(res.Indicators.Quote[0].Open) > 0 {
+				refPrice = res.Indicators.Quote[0].Open[0]
+			}
+			if refPrice == 0 || currentPrice == 0 {
+				return
+			}
+			stale := true
+			if len(res.Timestamp) > 0 {
+				bt := time.Unix(res.Timestamp[0], 0)
+				now := time.Now()
+				stale = bt.Year() != now.Year() || bt.Month() != now.Month() || bt.Day() != now.Day()
+			}
+			mu.Lock()
+			results[ticker] = quoteResult{
+				Price:    currentPrice,
+				Change:   (currentPrice - refPrice) / refPrice * 100,
+				Currency: res.Meta.Currency,
+				Stale:    stale,
+			}
+			mu.Unlock()
+		}(t)
+	}
+	wg.Wait()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
 func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	// Portfolio is persisted immediately on every write — nothing to do.
 	w.Header().Set("Content-Type", "application/json")
@@ -505,6 +605,11 @@ func (s *Server) routes() http.Handler {
 			s.deleteMe(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	protected.HandleFunc("/api/quotes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.quotesYahoo(w, r)
 		}
 	})
 	protected.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
