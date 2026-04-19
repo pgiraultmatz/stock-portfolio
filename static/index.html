@@ -111,6 +111,19 @@
     }
     .cat-del-btn:hover { color: #f85149; background: rgba(248,81,73,0.1); }
 
+    /* ---- stock quotes ---- */
+    .stock-quote {
+      font-size: 12px; font-family: 'SF Mono', monospace;
+      display: flex; align-items: baseline; gap: 5px;
+      min-width: 130px; justify-content: flex-end; margin-right: 10px;
+      color: #8b949e;
+    }
+    .q-price { color: #c9d1d9; }
+    .q-change { font-weight: 600; }
+    .q-change.up   { color: #3fb950; }
+    .q-change.down { color: #f85149; }
+    .q-stale { font-size: 10px; color: #484f58; }
+
     /* ---- stock rows ---- */
     .stock-row {
       display: flex; align-items: center;
@@ -365,11 +378,50 @@ function toEmoji(code) {
   return EMOJI_MAP[code] || code || '📁';
 }
 
+// ---- quotes ----
+let quotes = {};
+let quotesTimer = null;
+
+function formatPrice(price, currency) {
+  if (!price) return '';
+  const sym = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CAD: 'CA$', AUD: 'A$' }[currency] || '';
+  return sym + price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function applyQuotes() {
+  for (const [ticker, q] of Object.entries(quotes)) {
+    const el = document.querySelector(`[data-quote-ticker="${ticker}"]`);
+    if (!el) continue;
+    const sign = q.change >= 0 ? '+' : '';
+    const cls  = q.change >= 0 ? 'up' : 'down';
+    const staleHtml = q.stale ? ' <span class="q-stale" title="Previous session">~</span>' : '';
+    el.innerHTML =
+      `<span class="q-price">${formatPrice(q.price, q.currency)}</span>` +
+      `<span class="q-change ${cls}">${sign}${q.change.toFixed(2)}%</span>` +
+      staleHtml;
+  }
+}
+
+async function fetchQuotes() {
+  if (!portfolio.stocks || portfolio.stocks.length === 0) return;
+  const tickers = portfolio.stocks.map(s => s.ticker).join(',');
+  try {
+    const res = await fetch(`/api/quotes?tickers=${encodeURIComponent(tickers)}`);
+    if (!res.ok) return;
+    quotes = await res.json();
+    applyQuotes();
+  } catch (e) { /* network error — silently ignore */ }
+}
+
 // ---- load ----
 async function load() {
   const res = await fetch('/api/portfolio');
   portfolio = await res.json();
   render();
+  fetchQuotes();
+  if (!quotesTimer) {
+    quotesTimer = setInterval(fetchQuotes, 5 * 60 * 1000);
+  }
 }
 
 // ---- render ----
@@ -411,12 +463,14 @@ function render() {
 
   document.getElementById('portfolio').innerHTML = html;
   bindPortfolioEvents();
+  applyQuotes();
 }
 
 function stockRowHTML(s) {
   return `<div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
   <span class="stock-name">${esc(s.name)}</span>
+  <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
   <span class="stock-ticker">${esc(s.ticker)}</span>
   <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
 </div>`;

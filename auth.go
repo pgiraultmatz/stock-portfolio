@@ -236,7 +236,7 @@ func seedDefaultPortfolio(ctx context.Context, store Store, userID string) error
 		{Ticker: "SGLD.L", Name: "Invesco Physical Gold", Category: "Metals"},
 		{Ticker: "BTC-USD", Name: "Bitcoin USD", Category: "Cryptos"},
 		{Ticker: "IQQE.DE", Name: "iShares MSCI World Energy", Category: "Energy"},
-		{Ticker: "VUSA.L", Name: "Vanguard S&P 500 UCITS ETF", Category: "USA"},
+		{Ticker: "VOO", Name: "Vanguard S&P 500 ETF", Category: "USA"},
 	}
 	if err := store.ReplaceCategories(ctx, userID, categories); err != nil {
 		return err
