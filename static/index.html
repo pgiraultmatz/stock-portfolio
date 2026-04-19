@@ -379,8 +379,10 @@ function toEmoji(code) {
 }
 
 // ---- quotes ----
-let quotes = {};
+let quotes = JSON.parse(localStorage.getItem('quotesCache') || '{}');
 let quotesTimer = null;
+let quotesLastFetched = Number(localStorage.getItem('quotesLastFetched') || 0);
+const QUOTES_COOLDOWN_MS = 60_000;
 
 function formatPrice(price, currency) {
   if (!price) return '';
@@ -402,13 +404,18 @@ function applyQuotes() {
   }
 }
 
-async function fetchQuotes() {
+async function fetchQuotes(force = false) {
   if (!portfolio.stocks || portfolio.stocks.length === 0) return;
+  if (!force && Object.keys(quotes).length > 0 && Date.now() - quotesLastFetched < QUOTES_COOLDOWN_MS) return;
   const tickers = portfolio.stocks.map(s => s.ticker).join(',');
+  console.log(`[quotes] fetching ${portfolio.stocks.length} tickers:`, tickers);
   try {
     const res = await fetch(`/api/quotes?tickers=${encodeURIComponent(tickers)}`);
     if (!res.ok) return;
     quotes = await res.json();
+    quotesLastFetched = Date.now();
+    localStorage.setItem('quotesLastFetched', quotesLastFetched);
+    localStorage.setItem('quotesCache', JSON.stringify(quotes));
     applyQuotes();
   } catch (e) { /* network error — silently ignore */ }
 }
@@ -420,7 +427,7 @@ async function load() {
   render();
   fetchQuotes();
   if (!quotesTimer) {
-    quotesTimer = setInterval(fetchQuotes, 5 * 60 * 1000);
+    quotesTimer = setInterval(() => fetchQuotes(true), 5 * 60 * 1000);
   }
 }
 
