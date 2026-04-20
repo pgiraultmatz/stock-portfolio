@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +34,11 @@ type SessionData struct {
 	ExpiresAt time.Time
 }
 
+type XGroup struct {
+	Name    string   `json:"name"    dynamodbav:"Name"`
+	Accounts []string `json:"accounts" dynamodbav:"Accounts"`
+}
+
 type Store interface {
 	GetUserByID(ctx context.Context, id string) (*User, error)
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
@@ -47,6 +53,9 @@ type Store interface {
 	ConsumeVerificationToken(ctx context.Context, token string) (string, error)
 
 	GetPortfolio(ctx context.Context, userID string) ([]Stock, []Category, error)
+	GetReportConfig(ctx context.Context, userID string) ([]XGroup, error)
+	PutReportConfig(ctx context.Context, userID string, groups []XGroup) error
+	GetNitterInstances(ctx context.Context, userID string) []string
 	PutStock(ctx context.Context, userID string, s Stock) error
 	DeleteStock(ctx context.Context, userID, ticker string) error
 	UpdateStockCategory(ctx context.Context, userID, ticker, category string) error
@@ -518,6 +527,60 @@ func (d *DynamoStore) ReplaceCategories(ctx context.Context, userID string, cats
 		}
 	}
 	return nil
+}
+
+func (d *DynamoStore) GetNitterInstances(_ context.Context, _ string) []string {
+	raw := os.Getenv("NITTER_INSTANCES")
+	if raw == "" {
+		return nil
+	}
+	var instances []string
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			instances = append(instances, s)
+		}
+	}
+	return instances
+}
+
+// ---- Report config ----
+
+func (d *DynamoStore) GetReportConfig(ctx context.Context, userID string) ([]XGroup, error) {
+	result, err := d.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: &d.table,
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: "USER#" + userID},
+			"SK": &types.AttributeValueMemberS{Value: "REPORT_CONFIG"},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.Item == nil {
+		return []XGroup{}, nil
+	}
+	var row struct {
+		XGroups []XGroup `dynamodbav:"XGroups"`
+	}
+	if err := attributevalue.UnmarshalMap(result.Item, &row); err != nil {
+		return nil, err
+	}
+	return row.XGroups, nil
+}
+
+func (d *DynamoStore) PutReportConfig(ctx context.Context, userID string, groups []XGroup) error {
+	if groups == nil {
+		groups = []XGroup{}
+	}
+	item, err := attributevalue.MarshalMap(map[string]any{
+		"PK": "USER#" + userID, "SK": "REPORT_CONFIG",
+		"XGroups": groups,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = d.client.PutItem(ctx, &dynamodb.PutItemInput{TableName: &d.table, Item: item})
+	return err
 }
 
 // ---- Sessions ----

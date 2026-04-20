@@ -558,6 +558,67 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(results)
 }
 
+func (s *Server) validateXHandle(w http.ResponseWriter, r *http.Request) {
+	handle := strings.TrimPrefix(strings.TrimSpace(r.URL.Query().Get("handle")), "@")
+	if handle == "" {
+		http.Error(w, "handle is required", http.StatusBadRequest)
+		return
+	}
+	instances := s.store.GetNitterInstances(r.Context(), userIDFromCtx(r))
+	client := &http.Client{Timeout: 8 * time.Second}
+	for _, inst := range instances {
+		inst = strings.TrimRight(strings.TrimSpace(inst), "/")
+		if inst == "" {
+			continue
+		}
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, inst+"/"+handle+"/rss", nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"valid": true})
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"valid": false})
+}
+
+func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
+	groups, err := s.store.GetReportConfig(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if groups == nil {
+		groups = []XGroup{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"xGroups": groups})
+}
+
+func (s *Server) putReport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		XGroups []XGroup `json:"xGroups"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.store.PutReportConfig(r.Context(), userIDFromCtx(r), body.XGroups); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	// Portfolio is persisted immediately on every write — nothing to do.
 	w.Header().Set("Content-Type", "application/json")
@@ -596,8 +657,21 @@ func (s *Server) routes() http.Handler {
 
 	// Protected routes
 	staticFS, _ := fs.Sub(staticFiles, "static")
+	fileServer := http.FileServer(http.FS(staticFS))
 	protected := http.NewServeMux()
-	protected.Handle("/", http.FileServer(http.FS(staticFS)))
+	protected.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Serve static files that exist; fall back to index.html for SPA routes
+		if r.URL.Path != "/" {
+			if f, err := staticFiles.Open("static" + r.URL.Path); err == nil {
+				f.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		data, _ := staticFiles.ReadFile("static/index.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+	})
 
 	protected.HandleFunc("/api/portfolio", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -674,6 +748,25 @@ func (s *Server) routes() http.Handler {
 		if r.Method == http.MethodPost {
 			s.saveConfig(w, r)
 		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/x/validate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.validateXHandle(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/report", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getReport(w, r)
+		case http.MethodPut:
+			s.putReport(w, r)
+		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
