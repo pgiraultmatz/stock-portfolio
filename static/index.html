@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="google" content="notranslate">
   <title>Portfolio Editor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -66,7 +68,8 @@
     /* ---- buttons ---- */
     .btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; transition: filter 0.15s; }
     .btn:hover { filter: brightness(1.15); }
-    .btn-export  { background: #1f6feb; color: #fff; }
+    .btn-export  { background: #30363d; color: #8b949e; }
+    .btn-export.dirty { background: #1f6feb; color: #fff; }
     .btn-primary { background: #238636; color: #fff; }
     .btn-ghost   { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
     .btn-del {
@@ -103,7 +106,8 @@
     }
     .cat-header:active { cursor: grabbing; }
     .cat-emoji { font-size: 18px; line-height: 1; }
-    .cat-name  { font-size: 15px; font-weight: 700; color: #e6edf3; }
+    .cat-name  { font-size: 15px; font-weight: 700; color: #e6edf3; cursor: text; }
+    .cat-rename-input { font-size: 15px; font-weight: 700; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; width: 160px; padding: 0; }
     .cat-count { font-size: 12px; color: #484f58; margin-left: auto; }
     .cat-del-btn {
       background: none; border: none; color: #484f58; cursor: pointer;
@@ -272,7 +276,7 @@
     <div class="header-meta" id="meta"></div>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
-    <button class="btn btn-export" onclick="saveToGist()">☁ Save</button>
+    <button id="save-btn" class="btn btn-export" onclick="saveToGist()">☁ Save</button>
     <div class="user-menu" id="user-menu">
       <button class="user-btn" onclick="toggleDropdown()" id="user-btn">
         <div class="avatar" id="user-avatar">?</div>
@@ -287,6 +291,18 @@
     </div>
   </div>
 </header>
+
+<!-- Confirm modal -->
+<div class="modal-overlay" id="confirm-modal">
+  <div class="modal" style="max-width:320px">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-message" style="font-size:13px;color:#8b949e;margin-bottom:20px"></p>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="confirmResolve(false)">Cancel</button>
+      <button class="btn btn-danger" onclick="confirmResolve(true)" id="confirm-ok">Delete</button>
+    </div>
+  </div>
+</div>
 
 <!-- My account modal -->
 <div class="modal-overlay" id="account-modal">
@@ -358,6 +374,11 @@
 
 <script>
 let portfolio = { stocks: [], categories: [] };
+let dirty = false;
+function setDirty(val) {
+  dirty = val;
+  document.getElementById('save-btn')?.classList.toggle('dirty', val);
+}
 let dragging = null;
 let insertTarget = null; // { ticker, before: bool }
 let draggingCat = null;
@@ -424,6 +445,7 @@ async function fetchQuotes(force = false) {
 async function load() {
   const res = await fetch('/api/portfolio');
   portfolio = await res.json();
+  setDirty(false);
   render();
   fetchQuotes();
   if (!quotesTimer) {
@@ -450,7 +472,7 @@ function render() {
   <div class="cat-header" draggable="true" data-drag-cat="${esc(cat.name)}">
     <span class="drag-handle" style="font-size:14px;margin-right:4px">⠿</span>
     <span class="cat-emoji">${toEmoji(cat.emoji)}</span>
-    <span class="cat-name">${esc(cat.name)}</span>
+    <span class="cat-name" data-rename-cat="${esc(cat.name)}" title="Double-click to rename">${esc(cat.name)}</span>
     <span class="cat-count">${stocks.length}</span>
     <button class="cat-del-btn" data-del-cat="${esc(cat.name)}">✕</button>
   </div>
@@ -491,6 +513,10 @@ function initPortfolioClicks() {
     if (delTicker) { deleteStock(delTicker.dataset.delTicker); return; }
     const delCat = e.target.closest('[data-del-cat]');
     if (delCat) { deleteCategory(delCat.dataset.delCat); return; }
+  });
+  el.addEventListener('dblclick', e => {
+    const span = e.target.closest('[data-rename-cat]');
+    if (span) startCategoryRename(span);
   });
 }
 
@@ -722,15 +748,10 @@ function pickStock(ticker, name) {
 }
 
 // ---- mutations ----
-async function addStock(ticker, name, category) {
-  const res = await fetch('/api/stocks', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticker, name, category }),
-  });
-  if (!res.ok) { toast('err', await res.text()); return; }
-  toast('ok', category ? `${ticker} added to ${category}` : `${ticker} added — drag it to a category`);
-  await load();
+function addStock(ticker, name, category) {
+  if (portfolio.stocks.find(s => s.ticker === ticker)) { toast('err', 'Ticker already exists'); return; }
+  portfolio.stocks.push({ ticker, name, category: category || '' });
+  setDirty(true); render();
 }
 
 function clearInsertIndicators() {
@@ -749,75 +770,117 @@ function clearDragState() {
   document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
 }
 
-async function reorderCategories(cats) {
+function reorderCategories(cats) {
   portfolio.categories = cats;
-  render(); // optimistic
-  const res = await fetch('/api/categories', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cats),
-  });
-  if (!res.ok) { toast('err', await res.text()); await load(); }
+  setDirty(true); render();
 }
 
-async function reorderStocks(stocks) {
+function reorderStocks(stocks) {
   portfolio.stocks = stocks;
-  render(); // optimistic
-  const res = await fetch('/api/stocks', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(stocks),
-  });
-  if (!res.ok) { toast('err', await res.text()); await load(); }
+  setDirty(true); render();
 }
 
-async function moveStock(ticker, category) {
-  const res = await fetch(`/api/stocks/${encodeURIComponent(ticker)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ category }),
-  });
-  if (!res.ok) { toast('err', await res.text()); return; }
-  await load();
+function moveStock(ticker, category) {
+  const s = portfolio.stocks.find(s => s.ticker === ticker);
+  if (s) s.category = category;
+  setDirty(true); render();
 }
 
-async function deleteStock(ticker) {
-  const res = await fetch(`/api/stocks/${encodeURIComponent(ticker)}`, { method: 'DELETE' });
-  if (!res.ok) { toast('err', `Impossible de supprimer ${ticker}`); return; }
-  toast('ok', `${ticker} supprimé`);
-  await load();
+function deleteStock(ticker) {
+  portfolio.stocks = portfolio.stocks.filter(s => s.ticker !== ticker);
+  setDirty(true); render();
 }
 
 async function createCategory() {
   const raw = (document.getElementById('ncat-input')?.value || '').trim();
   if (!raw) { toast('err', 'Category name is required'); return; }
-  // Extract leading emoji (non-ASCII) as the emoji field, rest as name
   const emojiMatch = raw.match(/^([\p{Emoji}\s]+?)\s+(.+)$/u);
   const emoji = emojiMatch ? emojiMatch[1].trim() : '';
   const name  = emojiMatch ? emojiMatch[2].trim() : raw;
-  const res = await fetch('/api/categories', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, emoji }),
-  });
-  if (!res.ok) { toast('err', await res.text()); return; }
-  toast('ok', `Category "${name}" created`);
+  if (portfolio.categories.find(c => c.name === name)) { toast('err', 'Category already exists'); return; }
+  const maxOrder = portfolio.categories.reduce((m, c) => Math.max(m, c.order), 0);
+  portfolio.categories.push({ name, emoji, order: maxOrder + 1 });
+  setDirty(true); render();
   const inp = document.getElementById('ncat-input');
   if (inp) inp.value = '';
-  await load();
 }
 
 async function deleteCategory(name) {
-  const res = await fetch(`/api/categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
-  if (!res.ok) { toast('err', await res.text()); return; }
-  toast('ok', `Category "${name}" deleted`);
-  await load();
+  const count = portfolio.stocks.filter(s => s.category === name).length;
+  if (count > 0) {
+    const ok = await showConfirm(
+      `Delete "${name}"?`,
+      `This category contains ${count} stock${count > 1 ? 's' : ''} which will become unassigned.`
+    );
+    if (!ok) return;
+  }
+  portfolio.categories = portfolio.categories.filter(c => c.name !== name);
+  portfolio.stocks = portfolio.stocks.map(s => s.category === name ? { ...s, category: '' } : s);
+  setDirty(true); render();
+}
+
+function startCategoryRename(span) {
+  const oldName = span.dataset.renameCat;
+  const cat = portfolio.categories.find(c => c.name === oldName);
+  const header = span.closest('.cat-header');
+  if (header) header.draggable = false;
+  const wrap = document.createElement('span');
+  wrap.className = 'emoji-wrap';
+  wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center';
+  const input = document.createElement('input');
+  input.className = 'cat-rename-input';
+  input.value = cat && cat.emoji ? `${cat.emoji} ${oldName}` : oldName;
+  const suggDiv = document.createElement('div');
+  suggDiv.className = 'emoji-sugg';
+  wrap.appendChild(input);
+  wrap.appendChild(suggDiv);
+  // Replace emoji span + name span so the input covers both
+  const emojiSpan = header && header.querySelector('.cat-emoji');
+  if (emojiSpan) emojiSpan.style.display = 'none';
+  span.replaceWith(wrap);
+  input.focus();
+  input.select();
+
+  function commit() {
+    if (header) header.draggable = true;
+    if (emojiSpan) emojiSpan.style.display = '';
+    const raw = input.value.trim();
+    if (!raw) { render(); return; }
+    const emojiMatch = raw.match(/^([\p{Emoji}\s]+?)\s+(.+)$/u);
+    const newEmoji = emojiMatch ? emojiMatch[1].trim() : (cat ? cat.emoji : '');
+    const newName  = emojiMatch ? emojiMatch[2].trim() : raw;
+    if (cat) { cat.name = newName; cat.emoji = newEmoji; }
+    portfolio.stocks = portfolio.stocks.map(s => s.category === oldName ? { ...s, category: newName } : s);
+    setDirty(true); render();
+  }
+  input.addEventListener('blur', commit, { once: true });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { render(); input.removeEventListener('blur', commit); }
+  });
 }
 
 async function saveToGist() {
-  const res = await fetch('/api/save', { method: 'POST' });
-  if (!res.ok) { toast('err', await res.text()); return; }
-  toast('ok', 'Saved');
+  setDirty(false);
+  const [r1, r2] = await Promise.all([
+    fetch('/api/stocks', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(portfolio.stocks) }),
+    fetch('/api/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(portfolio.categories) }),
+  ]);
+  if (!r1.ok || !r2.ok) { setDirty(true); toast('err', 'Save failed'); }
+}
+
+let confirmResolve = null;
+function showConfirm(title, message) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-message').textContent = message;
+  document.getElementById('confirm-modal').classList.add('open');
+  return new Promise(resolve => {
+    confirmResolve = val => {
+      document.getElementById('confirm-modal').classList.remove('open');
+      confirmResolve = null;
+      resolve(val);
+    };
+  });
 }
 
 function esc(s) {
@@ -858,9 +921,11 @@ let emojiSuggItems = [], emojiSuggIdx = -1;
 
 // Use event delegation since #ncat-emoji is re-created on each render
 document.getElementById('portfolio').addEventListener('input', e => {
-  if (e.target.id !== 'ncat-input') return;
+  const isAdd = e.target.id === 'ncat-input';
+  const isRename = e.target.classList.contains('cat-rename-input');
+  if (!isAdd && !isRename) return;
   const val = e.target.value;
-  const sugg = document.getElementById('emoji-sugg');
+  const sugg = e.target.parentElement?.querySelector('.emoji-sugg');
   if (!sugg) return;
 
   const m = val.match(/:([a-z0-9_]*)$/);
@@ -891,8 +956,10 @@ document.getElementById('portfolio').addEventListener('input', e => {
 });
 
 document.getElementById('portfolio').addEventListener('keydown', e => {
-  if (e.target.id !== 'ncat-input') return;
-  const sugg = document.getElementById('emoji-sugg');
+  const isAdd = e.target.id === 'ncat-input';
+  const isRename = e.target.classList.contains('cat-rename-input');
+  if (!isAdd && !isRename) return;
+  const sugg = e.target.parentElement?.querySelector('.emoji-sugg');
   const open = sugg && sugg.style.display !== 'none';
 
   if (e.key === 'Enter') {
@@ -901,7 +968,7 @@ document.getElementById('portfolio').addEventListener('keydown', e => {
       pickEmoji(emojiSuggItems[emojiSuggIdx].dataset.glyph, e.target);
     } else {
       if (open) { sugg.style.display = 'none'; emojiSuggItems = []; emojiSuggIdx = -1; }
-      createCategory();
+      if (isAdd) createCategory(); else e.target.blur();
     }
   } else if (!open) {
     return;
@@ -921,9 +988,8 @@ document.getElementById('portfolio').addEventListener('keydown', e => {
 });
 
 function pickEmoji(glyph, input) {
-  // Replace the :query at the end with the chosen emoji
   input.value = input.value.replace(/:([a-z0-9_]*)$/, glyph);
-  const sugg = document.getElementById('emoji-sugg');
+  const sugg = input.parentElement?.querySelector('.emoji-sugg');
   if (sugg) sugg.style.display = 'none';
   emojiSuggItems = []; emojiSuggIdx = -1;
   input.focus();
@@ -931,8 +997,8 @@ function pickEmoji(glyph, input) {
 
 document.addEventListener('click', e => {
   if (!e.target.closest('.emoji-wrap')) {
-    const sugg = document.getElementById('emoji-sugg');
-    if (sugg) sugg.style.display = 'none';
+    document.querySelectorAll('.emoji-sugg').forEach(s => s.style.display = 'none');
+    emojiSuggItems = []; emojiSuggIdx = -1;
   }
 });
 

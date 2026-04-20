@@ -195,6 +195,28 @@ func (s *GistStore) DeleteCategory(_ context.Context, _, name string) error {
 	return ErrNotFound
 }
 
+func (s *GistStore) RenameCategory(_ context.Context, _ string, oldName, newName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := false
+	for i, c := range s.categories {
+		if c.Name == oldName {
+			s.categories[i].Name = newName
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrNotFound
+	}
+	for i, st := range s.stocks {
+		if st.Category == oldName {
+			s.stocks[i].Category = newName
+		}
+	}
+	return s.persist()
+}
+
 func (s *GistStore) ReplaceCategories(_ context.Context, _ string, cats []Category) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

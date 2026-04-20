@@ -385,6 +385,37 @@ func (s *Server) putCategories(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) patchCategory(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/categories/")
+	name, _ = url.PathUnescape(name)
+	if name == "" {
+		http.Error(w, "category name required", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	newName := strings.TrimSpace(body.Name)
+	if newName == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	err := s.store.RenameCategory(r.Context(), userIDFromCtx(r), name, newName)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/categories/")
 	name, _ = url.PathUnescape(name)
@@ -596,9 +627,12 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 	protected.HandleFunc("/api/categories/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
+		switch r.Method {
+		case http.MethodDelete:
 			s.deleteCategory(w, r)
-		} else {
+		case http.MethodPatch:
+			s.patchCategory(w, r)
+		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
