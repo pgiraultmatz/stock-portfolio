@@ -3,3 +3,7 @@ stock-portfolio
 .env
 .env.prod
 stock-portfolio-linux
+# Terraform state
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/.terraform/
