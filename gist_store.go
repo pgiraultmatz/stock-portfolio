@@ -22,8 +22,10 @@ type GistStore struct {
 	gistID       string
 	githubToken  string
 	gistFilename string
+	rawConfig    map[string]json.RawMessage // preserves all unknown fields
 	stocks       []Stock
 	categories   []Category
+	xGroups      []XGroup
 }
 
 func NewGistStore(_ context.Context) (*GistStore, error) {
@@ -79,23 +81,37 @@ func (s *GistStore) load() error {
 		return fmt.Errorf("file %q not found in gist %s", filename, s.gistID)
 	}
 	s.gistFilename = filename
-	var cfg struct {
-		Stocks     []Stock    `json:"stocks"`
-		Categories []Category `json:"categories"`
-	}
-	if err := json.Unmarshal([]byte(f.Content), &cfg); err != nil {
+	s.rawConfig = make(map[string]json.RawMessage)
+	if err := json.Unmarshal([]byte(f.Content), &s.rawConfig); err != nil {
 		return err
 	}
-	s.stocks = cfg.Stocks
-	s.categories = cfg.Categories
+	if v, ok := s.rawConfig["stocks"]; ok {
+		json.Unmarshal(v, &s.stocks)
+	}
+	if v, ok := s.rawConfig["categories"]; ok {
+		json.Unmarshal(v, &s.categories)
+	}
+	if v, ok := s.rawConfig["xGroups"]; ok {
+		json.Unmarshal(v, &s.xGroups)
+	} else if v, ok := s.rawConfig["xAccounts"]; ok {
+		// migrate legacy flat list into a default group
+		var handles []string
+		if json.Unmarshal(v, &handles) == nil && len(handles) > 0 {
+			s.xGroups = []XGroup{{Name: "General", Accounts: handles}}
+		}
+	}
 	return nil
 }
 
 func (s *GistStore) persist() error {
-	data, err := json.MarshalIndent(map[string]any{
-		"stocks":     s.stocks,
-		"categories": s.categories,
-	}, "", "  ")
+	stocksJSON, _ := json.Marshal(s.stocks)
+	catsJSON, _ := json.Marshal(s.categories)
+	xGroupsJSON, _ := json.Marshal(s.xGroups)
+	s.rawConfig["stocks"] = json.RawMessage(stocksJSON)
+	s.rawConfig["categories"] = json.RawMessage(catsJSON)
+	s.rawConfig["xGroups"] = json.RawMessage(xGroupsJSON)
+	delete(s.rawConfig, "xAccounts")
+	data, err := json.MarshalIndent(s.rawConfig, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -221,6 +237,39 @@ func (s *GistStore) ReplaceCategories(_ context.Context, _ string, cats []Catego
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.categories = cats
+	return s.persist()
+}
+
+func (s *GistStore) GetNitterInstances(_ context.Context, _ string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.rawConfig["twitter"]
+	if !ok {
+		return nil
+	}
+	var twitter struct {
+		NitterInstances []string `json:"nitter_instances"`
+	}
+	if err := json.Unmarshal(v, &twitter); err != nil {
+		return nil
+	}
+	return twitter.NitterInstances
+}
+
+// ---- report config ----
+
+func (s *GistStore) GetReportConfig(_ context.Context, _ string) ([]XGroup, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	groups := make([]XGroup, len(s.xGroups))
+	copy(groups, s.xGroups)
+	return groups, nil
+}
+
+func (s *GistStore) PutReportConfig(_ context.Context, _ string, groups []XGroup) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.xGroups = groups
 	return s.persist()
 }
 

@@ -27,6 +27,80 @@
     header h1 { font-size: 17px; font-weight: 700; color: #e6edf3; }
     .header-meta { font-size: 12px; color: #8b949e; margin-top: 2px; }
 
+    /* ---- nav tabs ---- */
+    .nav-tabs {
+      display: flex; gap: 0; padding: 0 24px;
+      background: #161b22; border-bottom: 1px solid #30363d;
+    }
+    .nav-tab {
+      padding: 10px 16px; font-size: 13px; font-weight: 600; color: #8b949e;
+      border: none; background: none; cursor: pointer;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color 0.15s;
+    }
+    .nav-tab:hover { color: #c9d1d9; }
+    .nav-tab.active { color: #e6edf3; border-bottom-color: #388bfd; }
+
+    /* ---- report view ---- */
+    .report-view {
+      max-width: 760px; margin: 0 auto;
+      padding: 32px 24px; box-sizing: border-box;
+    }
+    .report-hero {
+      background: linear-gradient(135deg, #1c3a56 0%, #0d2137 60%, #111827 100%);
+      border: 1px solid #1f4976; border-radius: 12px;
+      padding: 20px 24px; margin-bottom: 24px;
+    }
+    .report-hero p { font-size: 13px; color: #8b949e; line-height: 1.7; margin: 0; }
+    .report-hero strong { color: #58a6ff; font-weight: 600; }
+    .report-hero-icon { font-size: 16px; vertical-align: middle; margin-right: 2px; }
+
+    /* ---- report config ---- */
+    .report-section {
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .report-section-title { font-size: 15px; font-weight: 700; color: #e6edf3; margin-bottom: 6px; }
+    .report-section-desc { font-size: 12px; color: #8b949e; line-height: 1.6; margin-bottom: 16px; }
+    .report-section-desc strong { color: #c9d1d9; font-weight: 600; }
+    .x-groups { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+    .x-group { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; cursor: default; }
+    .x-group.dragging { opacity: 0.4; }
+    .x-group.drag-over { border-color: #388bfd; }
+    .x-group-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #30363d; cursor: grab; }
+    .x-group-drag { color: #484f58; font-size: 12px; flex-shrink: 0; }
+    .x-group-name { font-size: 13px; font-weight: 600; color: #e6edf3; flex: 1; cursor: text; }
+    .x-group-rename { font-size: 13px; font-weight: 600; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; flex: 1; padding: 0; }
+    .x-group-del { background: none; border: none; color: #484f58; cursor: pointer; font-size: 13px; padding: 0; transition: color .15s; }
+    .x-group-del:hover { color: #f85149; }
+    .x-account-list { display: flex; flex-direction: column; gap: 0; }
+    .x-account-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 12px; cursor: grab; user-select: none;
+      border-bottom: 1px solid #21262d;
+    }
+    .x-account-row:last-child { border-bottom: none; }
+    .x-account-row.dragging { opacity: 0.4; }
+    .x-account-row.drag-over { background: #1f2937; }
+    .x-account-drag { color: #484f58; font-size: 12px; flex-shrink: 0; }
+    .x-account-handle { font-size: 13px; color: #c9d1d9; flex: 1; }
+    .x-account-handle span { color: #484f58; }
+    .x-account-del { background: none; border: none; color: #484f58; cursor: pointer; font-size: 13px; padding: 0; line-height: 1; transition: color .15s; flex-shrink: 0; }
+    .x-account-del:hover { color: #f85149; }
+    .x-group-add { display: flex; gap: 6px; padding: 8px 12px; }
+    .x-group-add-input { flex: 1; padding: 5px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 12px; outline: none; transition: border-color .15s; }
+    .x-group-add-input:focus { border-color: #388bfd; }
+    .x-group-add-input::placeholder { color: #484f58; }
+    .x-group-add-btn { padding: 5px 10px; font-size: 12px; }
+    .x-add-bar { display: flex; gap: 8px; align-items: center; }
+    .x-add-input {
+      width: 200px; padding: 7px 12px;
+      background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; font-size: 13px; outline: none; transition: border-color .15s;
+    }
+    .x-add-input:focus { border-color: #388bfd; }
+    .x-add-input::placeholder { color: #484f58; }
+
     /* ---- add bar ---- */
     .add-bar {
       padding: 12px 24px;
@@ -353,6 +427,13 @@
   </div>
 </div>
 
+<nav class="nav-tabs">
+  <button class="nav-tab active" onclick="switchView('stocks')">My Stocks</button>
+  <button class="nav-tab" onclick="switchView('report')">My Report</button>
+</nav>
+
+<div id="view-stocks">
+
 <div class="welcome-banner hidden" id="welcome-banner">
   <p><strong>Welcome to Stock Portfolio!</strong> We've set up a sample portfolio to get you started. Feel free to customize it.</p>
   <button class="welcome-close" onclick="dismissWelcome()">×</button>
@@ -370,11 +451,43 @@
 </div>
 
 <div class="portfolio" id="portfolio"></div>
+
+</div><!-- /view-stocks -->
+
+<div id="view-report" style="display:none">
+  <div class="report-view">
+    <div class="report-hero">
+      <p style="margin:0 0 6px"><span class="report-hero-icon">🚀</span> <strong style="color:#e6edf3">Stock Market Report</strong></p>
+      <p>Every morning, receive a <strong>curated snapshot</strong> of all your positions — prices, trends, and momentum — paired with an <strong>AI-powered prompt</strong> engineered to help you think deeper, spot patterns, and stay one step ahead.</p>
+    </div>
+    <div class="report-section">
+      <div class="report-section-title">𝕏 Signal Sources</div>
+      <p class="report-section-desc">Enrich your daily report with the latest posts from strategic X accounts — <strong>insiders</strong>, <strong>politicians</strong>, <strong>quantitative analysts</strong>, and <strong>traders</strong> — to sharpen your market intelligence.</p>
+      <div class="x-groups" id="x-groups"></div>
+      <button class="btn btn-cancel" onclick="addXGroup()" style="font-size:12px;padding:6px 12px">+ Add group</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 let portfolio = { stocks: [], categories: [] };
+let xGroups = [];
 let dirty = false;
+
+function switchView(view, push = true) {
+  document.getElementById('view-stocks').style.display = view === 'stocks' ? '' : 'none';
+  document.getElementById('view-report').style.display  = view === 'report'  ? '' : 'none';
+  document.querySelectorAll('.nav-tab').forEach((t, i) => {
+    t.classList.toggle('active', (i === 0 && view === 'stocks') || (i === 1 && view === 'report'));
+  });
+  if (push) history.pushState({ view }, '', '/' + view);
+}
+
+window.addEventListener('popstate', e => {
+  switchView(e.state?.view ?? 'stocks', false);
+});
 function setDirty(val) {
   dirty = val;
   document.getElementById('save-btn')?.classList.toggle('dirty', val);
@@ -443,10 +556,16 @@ async function fetchQuotes(force = false) {
 
 // ---- load ----
 async function load() {
-  const res = await fetch('/api/portfolio');
-  portfolio = await res.json();
+  const [portfolioRes, reportRes] = await Promise.all([
+    fetch('/api/portfolio'),
+    fetch('/api/report'),
+  ]);
+  portfolio = await portfolioRes.json();
+  const reportData = await reportRes.json();
+  xGroups = reportData.xGroups || [];
   setDirty(false);
   render();
+  renderXGroups();
   fetchQuotes();
   if (!quotesTimer) {
     quotesTimer = setInterval(() => fetchQuotes(true), 5 * 60 * 1000);
@@ -869,6 +988,188 @@ async function saveToGist() {
   if (!r1.ok || !r2.ok) { setDirty(true); toast('err', 'Save failed'); }
 }
 
+function renderXGroups() {
+  const container = document.getElementById('x-groups');
+  if (!container) return;
+  container.innerHTML = xGroups.map((g, gi) => `
+    <div class="x-group" data-group-idx="${gi}">
+      <div class="x-group-header" draggable="true" data-drag-group="${gi}">
+        <span class="x-group-drag">⠿</span>
+        <span class="x-group-name" data-rename-group="${gi}" title="Double-click to rename">${esc(g.name)}</span>
+        <button class="x-group-del" onclick="removeXGroup(${gi})" title="Delete group">✕</button>
+      </div>
+      <div class="x-account-list" data-group-idx="${gi}">
+        ${(g.accounts || []).map(h => `
+          <div class="x-account-row" draggable="true" data-handle="${esc(h)}" data-group-idx="${gi}">
+            <span class="x-account-drag">⠿</span>
+            <span class="x-account-handle"><span>@</span>${esc(h)}</span>
+            <button class="x-account-del" onclick="removeXHandle(${gi},'${esc(h)}')" title="Remove">✕</button>
+          </div>`).join('')}
+      </div>
+      <div class="x-group-add">
+        <input class="x-group-add-input" placeholder="@XUsername" autocomplete="off" data-group-idx="${gi}">
+        <button class="btn btn-primary x-group-add-btn" data-group-idx="${gi}">Add</button>
+      </div>
+    </div>`).join('');
+
+  // rename on double-click
+  container.querySelectorAll('.x-group-name').forEach(span => {
+    span.addEventListener('dblclick', () => startGroupRename(span));
+  });
+
+  // add handle buttons
+  container.querySelectorAll('.x-group-add-btn').forEach(btn => {
+    btn.addEventListener('click', () => addXHandle(parseInt(btn.dataset.groupIdx)));
+  });
+  container.querySelectorAll('.x-group-add-input').forEach(input => {
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addXHandle(parseInt(input.dataset.groupIdx));
+    });
+  });
+
+  bindXAccountDrag();
+  bindXGroupDrag();
+}
+
+function bindXGroupDrag() {
+  const container = document.getElementById('x-groups');
+  if (!container) return;
+  let draggingEl = null;
+
+  container.querySelectorAll('.x-group').forEach(group => {
+    const header = group.querySelector('.x-group-header');
+    header.addEventListener('dragstart', e => {
+      draggingEl = group;
+      group.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
+    });
+    header.addEventListener('dragend', () => {
+      draggingEl = null;
+      group.classList.remove('dragging');
+      container.querySelectorAll('.x-group').forEach(g => g.classList.remove('drag-over'));
+      xGroups = Array.from(container.querySelectorAll('.x-group')).map(g => {
+        const gi = parseInt(g.dataset.groupIdx);
+        return xGroups[gi];
+      });
+      renderXGroups();
+      saveXGroups();
+    });
+    group.addEventListener('dragover', e => {
+      if (!draggingEl || draggingEl === group) return;
+      e.preventDefault();
+      container.querySelectorAll('.x-group').forEach(g => g.classList.remove('drag-over'));
+      group.classList.add('drag-over');
+      const after = e.clientY > group.getBoundingClientRect().top + group.offsetHeight / 2;
+      container.insertBefore(draggingEl, after ? group.nextSibling : group);
+    });
+    group.addEventListener('dragleave', e => {
+      if (!e.relatedTarget || !group.contains(e.relatedTarget)) group.classList.remove('drag-over');
+    });
+  });
+}
+
+function bindXAccountDrag() {
+  document.querySelectorAll('.x-account-list').forEach(list => {
+    let draggingEl = null;
+    list.querySelectorAll('.x-account-row').forEach(row => {
+      row.addEventListener('dragstart', e => {
+        draggingEl = row;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      row.addEventListener('dragend', () => {
+        draggingEl = null;
+        row.classList.remove('dragging');
+        list.querySelectorAll('.x-account-row').forEach(r => r.classList.remove('drag-over'));
+        const gi = parseInt(list.dataset.groupIdx);
+        xGroups[gi].accounts = Array.from(list.querySelectorAll('.x-account-row')).map(r => r.dataset.handle);
+        saveXGroups();
+      });
+      row.addEventListener('dragover', e => {
+        if (!draggingEl || draggingEl === row) return;
+        e.preventDefault();
+        list.querySelectorAll('.x-account-row').forEach(r => r.classList.remove('drag-over'));
+        row.classList.add('drag-over');
+        const after = e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+        list.insertBefore(draggingEl, after ? row.nextSibling : row);
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    });
+  });
+}
+
+function addXGroup() {
+  xGroups.push({ name: 'New Group', accounts: [] });
+  renderXGroups();
+  saveXGroups();
+  // auto-start rename on new group
+  const spans = document.querySelectorAll('.x-group-name');
+  if (spans.length) startGroupRename(spans[spans.length - 1]);
+}
+
+function removeXGroup(gi) {
+  xGroups.splice(gi, 1);
+  renderXGroups();
+  saveXGroups();
+}
+
+function startGroupRename(span) {
+  const gi = parseInt(span.dataset.renameGroup);
+  const input = document.createElement('input');
+  input.className = 'x-group-rename';
+  input.value = xGroups[gi].name;
+  span.replaceWith(input);
+  input.focus(); input.select();
+  function commit() {
+    const name = input.value.trim();
+    if (name) { xGroups[gi].name = name; saveXGroups(); }
+    renderXGroups();
+  }
+  input.addEventListener('blur', commit, { once: true });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { input.removeEventListener('blur', commit); renderXGroups(); }
+  });
+}
+
+async function addXHandle(gi) {
+  const input = document.querySelector(`.x-group-add-input[data-group-idx="${gi}"]`);
+  const btn = document.querySelector(`.x-group-add-btn[data-group-idx="${gi}"]`);
+  if (!input || !btn) return;
+  const handle = input.value.trim().replace(/^@/, '');
+  if (!handle) return;
+  if (xGroups.some(g => g.accounts.includes(handle))) { input.value = ''; return; }
+
+  btn.disabled = true; btn.textContent = '…';
+  const res = await fetch(`/api/x/validate?handle=${encodeURIComponent(handle)}`);
+  btn.disabled = false; btn.textContent = 'Add';
+
+  if (!res.ok) { toast('err', 'Validation failed'); return; }
+  const { valid } = await res.json();
+  if (!valid) { toast('err', `@${handle} not found on X`); return; }
+
+  xGroups[gi].accounts.push(handle);
+  input.value = '';
+  renderXGroups();
+  saveXGroups();
+}
+
+function removeXHandle(gi, handle) {
+  xGroups[gi].accounts = xGroups[gi].accounts.filter(h => h !== handle);
+  renderXGroups();
+  saveXGroups();
+}
+
+async function saveXGroups() {
+  const res = await fetch('/api/report', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ xGroups }),
+  });
+  if (!res.ok) { toast('err', 'Failed to save'); }
+}
+
 let confirmResolve = null;
 function showConfirm(title, message) {
   document.getElementById('confirm-title').textContent = title;
@@ -1100,8 +1401,10 @@ if (new URLSearchParams(window.location.search).get('welcome') === '1') {
 }
 
 initPortfolioClicks();
+
 loadUser();
 load();
+switchView(location.pathname === '/report' ? 'report' : 'stocks', false);
 </script>
 </body>
 </html>
