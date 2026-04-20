@@ -54,19 +54,30 @@ type Server struct {
 }
 
 func NewServer(ctx context.Context) (*Server, error) {
-	region := os.Getenv("AWS_REGION")
-	if region == "" {
-		region = "us-east-1"
-	}
-	table := os.Getenv("DYNAMODB_TABLE")
-	if table == "" {
-		table = "stock-portfolio"
-	}
-	endpoint := os.Getenv("DYNAMODB_ENDPOINT")
-
-	store, err := NewDynamoStore(ctx, endpoint, region, table)
-	if err != nil {
-		return nil, fmt.Errorf("init store: %w", err)
+	var store Store
+	switch backend := os.Getenv("STORAGE_BACKEND"); backend {
+	case "gist":
+		gs, err := NewGistStore(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("init gist store: %w", err)
+		}
+		store = gs
+	case "", "dynamodb":
+		region := os.Getenv("AWS_REGION")
+		if region == "" {
+			region = "us-east-1"
+		}
+		table := os.Getenv("DYNAMODB_TABLE")
+		if table == "" {
+			table = "stock-portfolio"
+		}
+		ds, err := NewDynamoStore(ctx, os.Getenv("DYNAMODB_ENDPOINT"), region, table)
+		if err != nil {
+			return nil, fmt.Errorf("init dynamodb store: %w", err)
+		}
+		store = ds
+	default:
+		return nil, fmt.Errorf("unknown STORAGE_BACKEND %q (valid: gist, dynamodb)", backend)
 	}
 
 	s := &Server{store: store}
@@ -108,6 +119,12 @@ func NewServer(ctx context.Context) (*Server, error) {
 
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.store.(*GistStore); ok {
+			ctx := context.WithValue(r.Context(), ctxUserID, gistUserID)
+			ctx = context.WithValue(ctx, ctxUser, gistStaticUser)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
 		userID, ok := s.getSession(r)
 		if !ok {
 			if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -696,11 +713,16 @@ func main() {
 	}
 
 	log.Printf("Portfolio editor running at http://localhost%s", *addr)
-	endpoint := os.Getenv("DYNAMODB_ENDPOINT")
-	if endpoint != "" {
-		log.Printf("DynamoDB: %s (local)", endpoint)
-	} else {
-		log.Printf("DynamoDB: table=%s region=%s", os.Getenv("DYNAMODB_TABLE"), os.Getenv("AWS_REGION"))
+	switch backend := os.Getenv("STORAGE_BACKEND"); backend {
+	case "gist":
+		log.Printf("Storage: gist (%s)", os.Getenv("GIST_ID"))
+	default:
+		endpoint := os.Getenv("DYNAMODB_ENDPOINT")
+		if endpoint != "" {
+			log.Printf("Storage: dynamodb %s (local)", endpoint)
+		} else {
+			log.Printf("Storage: dynamodb table=%s region=%s", os.Getenv("DYNAMODB_TABLE"), os.Getenv("AWS_REGION"))
+		}
 	}
 
 	if err := http.ListenAndServe(*addr, srv.routes()); err != nil {
