@@ -53,6 +53,7 @@ type Store interface {
 	ReplaceStocks(ctx context.Context, userID string, stocks []Stock) error
 	PutCategory(ctx context.Context, userID string, c Category) error
 	DeleteCategory(ctx context.Context, userID, name string) error
+	RenameCategory(ctx context.Context, userID, oldName, newName string) error
 	ReplaceCategories(ctx context.Context, userID string, cats []Category) error
 
 	CreateSession(ctx context.Context, token, userID string, expiresAt time.Time) error
@@ -414,6 +415,74 @@ func (d *DynamoStore) DeleteCategory(ctx context.Context, userID, name string) e
 			return ErrNotFound
 		}
 		return err
+	}
+	return nil
+}
+
+func (d *DynamoStore) RenameCategory(ctx context.Context, userID, oldName, newName string) error {
+	pk := "USER#" + userID
+	// Load current category to preserve emoji and order
+	result, err := d.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: &d.table,
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: pk},
+			"SK": &types.AttributeValueMemberS{Value: "CATEGORY#" + oldName},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if result.Item == nil {
+		return ErrNotFound
+	}
+	var cat struct {
+		Emoji string `dynamodbav:"Emoji"`
+		Order int    `dynamodbav:"Order"`
+	}
+	if err := attributevalue.UnmarshalMap(result.Item, &cat); err != nil {
+		return err
+	}
+	// Create new category item
+	newItem, err := attributevalue.MarshalMap(map[string]any{
+		"PK": pk, "SK": "CATEGORY#" + newName,
+		"Name": newName, "Emoji": cat.Emoji, "Order": cat.Order,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := d.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &d.table, Item: newItem,
+	}); err != nil {
+		return err
+	}
+	// Delete old category item
+	if _, err := d.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: &d.table,
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: pk},
+			"SK": &types.AttributeValueMemberS{Value: "CATEGORY#" + oldName},
+		},
+	}); err != nil {
+		return err
+	}
+	// Update all stocks referencing the old category
+	stocks, err := d.queryBySKPrefix(ctx, pk, "STOCK#")
+	if err != nil {
+		return err
+	}
+	for _, item := range stocks {
+		catAttr, ok := item["Category"]
+		if !ok {
+			continue
+		}
+		catVal, ok := catAttr.(*types.AttributeValueMemberS)
+		if !ok || catVal.Value != oldName {
+			continue
+		}
+		ticker := item["SK"].(*types.AttributeValueMemberS).Value[len("STOCK#"):]
+		if err := d.UpdateStockCategory(ctx, userID, ticker, newName); err != nil {
+			return err
+		}
 	}
 	return nil
 }
