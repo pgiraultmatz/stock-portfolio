@@ -132,6 +132,10 @@
     .sugg-sym  { font-weight: 700; font-size: 13px; color: #79c0ff; min-width: 70px; }
     .sugg-name { font-size: 12px; color: #8b949e; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sugg-type { font-size: 10px; color: #484f58; }
+    .sugg-change { font-size: 11px; font-weight: 600; margin-left: auto; white-space: nowrap; }
+    .sugg-change.up   { color: #3fb950; }
+    .sugg-change.down { color: #f85149; }
+    .sugg-change.loading { color: #484f58; }
 
     .cat-select {
       padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
@@ -811,6 +815,7 @@ inp.addEventListener('input', () => {
   <span class="sugg-sym">${esc(q.symbol)}</span>
   <span class="sugg-name">${esc(q.shortname || q.longname || '')}</span>
   <span class="sugg-type">${esc(q.quoteType || '')}</span>
+  <span class="sugg-change loading" data-sugg-ticker="${esc(q.symbol)}">…</span>
 </div>`).join('');
         suggItems = Array.from(sugg.querySelectorAll('.sugg-item[data-symbol]'));
         suggItems.forEach(item => {
@@ -819,6 +824,25 @@ inp.addEventListener('input', () => {
             pickStock(item.dataset.symbol, item.dataset.name);
           });
         });
+        // Fetch variations for search results in parallel
+        const symbols = quotes.map(q => q.symbol).join(',');
+        fetch(`/api/quotes?tickers=${encodeURIComponent(symbols)}`, { signal: ctrl.signal })
+          .then(r => r.json())
+          .then(qdata => {
+            for (const [ticker, q] of Object.entries(qdata)) {
+              const el = sugg.querySelector(`[data-sugg-ticker="${ticker}"]`);
+              if (!el) continue;
+              const sign = q.change >= 0 ? '+' : '';
+              const cls  = q.change >= 0 ? 'up' : 'down';
+              el.textContent = `${sign}${q.change.toFixed(2)}%`;
+              el.className = `sugg-change ${cls}`;
+            }
+          })
+          .catch(() => {
+            sugg.querySelectorAll('.sugg-change.loading').forEach(el => {
+              el.textContent = '';
+            });
+          });
       }
       sugg.style.display = 'block';
     } catch (e) { if (e.name !== 'AbortError') console.error(e); }
@@ -870,7 +894,13 @@ function pickStock(ticker, name) {
 function addStock(ticker, name, category) {
   if (portfolio.stocks.find(s => s.ticker === ticker)) { toast('err', 'Ticker already exists'); return; }
   portfolio.stocks.push({ ticker, name, category: category || '' });
-  setDirty(true); render();
+  setDirty(true); render(); applyQuotes();
+  if (!quotes[ticker]) {
+    fetch(`/api/quotes?tickers=${encodeURIComponent(ticker)}`)
+      .then(r => r.json())
+      .then(qdata => { Object.assign(quotes, qdata); applyQuotes(); })
+      .catch(() => {});
+  }
 }
 
 function clearInsertIndicators() {
