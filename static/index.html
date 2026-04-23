@@ -17,9 +17,11 @@
       padding-bottom: 32px;
     }
 
+    /* ---- sticky top bar ---- */
+    .sticky-top-bar { position: sticky; top: 0; z-index: 200; }
+
     /* ---- header ---- */
     header {
-      position: sticky; top: 0; z-index: 200;
       background: #161b22; border-bottom: 1px solid #30363d;
       padding: 12px 24px;
       display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -129,6 +131,9 @@
     }
     .sugg-item:last-child { border-bottom: none; }
     .sugg-item:hover, .sugg-item.active { background: #21262d; }
+    .sugg-item.already-added { opacity: 0.5; cursor: default; }
+    .sugg-item.already-added:hover { background: transparent; }
+    .sugg-already { font-size: 10px; color: #3fb950; font-weight: 600; margin-left: auto; white-space: nowrap; }
     .sugg-sym  { font-weight: 700; font-size: 13px; color: #79c0ff; min-width: 70px; }
     .sugg-name { font-size: 12px; color: #8b949e; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sugg-type { font-size: 10px; color: #484f58; }
@@ -185,7 +190,7 @@
     .cat-header:active { cursor: grabbing; }
     .cat-emoji { font-size: 18px; line-height: 1; }
     .cat-name  { font-size: 15px; font-weight: 700; color: #e6edf3; cursor: text; }
-    .cat-rename-input { font-size: 15px; font-weight: 700; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; width: 160px; padding: 0; }
+    .cat-rename-input { font-size: 15px; font-weight: 700; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; width: 280px; padding: 0; }
     .cat-count { font-size: 12px; color: #484f58; margin-left: auto; }
     .cat-del-btn {
       background: none; border: none; color: #484f58; cursor: pointer;
@@ -218,8 +223,10 @@
     .stock-row.insert-before { border-top: 2px solid #388bfd !important; }
     .stock-row.insert-after  { border-bottom: 2px solid #388bfd !important; }
     .drag-handle { color: #30363d; font-size: 13px; margin-right: 8px; user-select: none; }
-    .stock-name   { flex: 1; font-size: 13px; color: #c9d1d9; }
-    .stock-ticker { font-size: 13px; font-weight: 700; color: #79c0ff; min-width: 100px; text-align: right; font-family: 'SF Mono', monospace; }
+    .stock-name   { flex: 1; font-size: 13px; color: #c9d1d9; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stock-ticker { font-size: 12px; font-weight: 400; color: #8b949e; font-family: 'SF Mono', monospace; }
+    .tv-link { color: #388bfd; font-size: 12px; padding: 2px 6px; border-radius: 4px; text-decoration: none; transition: color 0.12s, background 0.12s; flex-shrink: 0; }
+    .tv-link:hover { color: #79c0ff; background: rgba(56,139,253,0.1); }
     .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
 
     /* ---- add category ---- */
@@ -348,13 +355,13 @@
 </head>
 <body>
 
+<div class="sticky-top-bar">
 <header>
   <div>
     <h1>📊 Portfolio Editor</h1>
     <div class="header-meta" id="meta"></div>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
-    <button id="save-btn" class="btn btn-export" onclick="saveToGist()">☁ Save</button>
     <div class="user-menu" id="user-menu">
       <button class="user-btn" onclick="toggleDropdown()" id="user-btn">
         <div class="avatar" id="user-avatar">?</div>
@@ -436,14 +443,7 @@
   <button class="nav-tab" onclick="switchView('report')">My Report</button>
 </nav>
 
-<div id="view-stocks">
-
-<div class="welcome-banner hidden" id="welcome-banner">
-  <p><strong>Welcome to Stock Portfolio!</strong> We've set up a sample portfolio to get you started. Feel free to customize it.</p>
-  <button class="welcome-close" onclick="dismissWelcome()">×</button>
-</div>
-
-<div class="add-bar">
+<div class="add-bar" id="add-bar">
   <div class="search-wrap">
     <input
       type="text" class="search-input" id="search-input"
@@ -452,6 +452,15 @@
     >
     <div class="suggestions" id="suggestions"></div>
   </div>
+  <button id="save-btn" class="btn btn-export" onclick="saveToGist()" style="margin-left:auto">☁ Save</button>
+</div>
+</div><!-- /sticky-top-bar -->
+
+<div id="view-stocks">
+
+<div class="welcome-banner hidden" id="welcome-banner">
+  <p><strong>Welcome to Stock Portfolio!</strong> We've set up a sample portfolio to get you started. Feel free to customize it.</p>
+  <button class="welcome-close" onclick="dismissWelcome()">×</button>
 </div>
 
 <div class="portfolio" id="portfolio"></div>
@@ -483,6 +492,7 @@ let dirty = false;
 function switchView(view, push = true) {
   document.getElementById('view-stocks').style.display = view === 'stocks' ? '' : 'none';
   document.getElementById('view-report').style.display  = view === 'report'  ? '' : 'none';
+  document.getElementById('add-bar').style.display = view === 'stocks' ? '' : 'none';
   document.querySelectorAll('.nav-tab').forEach((t, i) => {
     t.classList.toggle('active', (i === 0 && view === 'stocks') || (i === 1 && view === 'report'));
   });
@@ -511,9 +521,9 @@ const EMOJI_MAP = {
   cn:'🇨🇳', eu:'🇪🇺', briefcase:'💼', seedling:'🌱',
 };
 function toEmoji(code) {
-  if (!code) return '📁';
+  if (!code) return '';
   if ([...code].some(c => c.codePointAt(0) > 127)) return code;
-  return EMOJI_MAP[code] || code || '📁';
+  return EMOJI_MAP[code] || code || '';
 }
 
 // ---- quotes ----
@@ -521,6 +531,7 @@ let quotes = JSON.parse(localStorage.getItem('quotesCache') || '{}');
 let quotesTimer = null;
 let quotesLastFetched = Number(localStorage.getItem('quotesLastFetched') || 0);
 const QUOTES_COOLDOWN_MS = 60_000;
+
 
 function formatPrice(price, currency) {
   if (!price) return '';
@@ -621,9 +632,9 @@ function render() {
 function stockRowHTML(s) {
   return `<div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
-  <span class="stock-name">${esc(s.name)}</span>
+  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <span class="stock-ticker">(${esc(s.ticker)})</span></span>
   <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
-  <span class="stock-ticker">${esc(s.ticker)}</span>
+  <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" title="Open on TradingView" draggable="false">Chart ↗</a>
   <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
 </div>`;
 }
@@ -809,15 +820,20 @@ inp.addEventListener('input', () => {
         sugg.innerHTML = '<div class="sugg-item" style="color:#484f58;cursor:default">No results</div>';
         suggItems = [];
       } else {
-        sugg.innerHTML = quotes.map(q => `<div class="sugg-item"
-          data-symbol="${esc(q.symbol)}"
-          data-name="${esc(q.shortname || q.longname || q.symbol)}">
+        sugg.innerHTML = quotes.map(q => {
+          const alreadyAdded = !!portfolio.stocks.find(s => s.ticker === q.symbol);
+          return `<div class="sugg-item${alreadyAdded ? ' already-added' : ''}"
+            data-symbol="${esc(q.symbol)}"
+            data-name="${esc(q.longname || q.shortname || q.symbol)}">
   <span class="sugg-sym">${esc(q.symbol)}</span>
-  <span class="sugg-name">${esc(q.shortname || q.longname || '')}</span>
+  <span class="sugg-name">${esc(q.longname || q.shortname || '')}</span>
   <span class="sugg-type">${esc(q.quoteType || '')}</span>
-  <span class="sugg-change loading" data-sugg-ticker="${esc(q.symbol)}">…</span>
-</div>`).join('');
-        suggItems = Array.from(sugg.querySelectorAll('.sugg-item[data-symbol]'));
+  ${alreadyAdded
+    ? `<span class="sugg-already">✓ Déjà ajouté</span>`
+    : `<span class="sugg-change loading" data-sugg-ticker="${esc(q.symbol)}">…</span>`}
+</div>`;
+        }).join('');
+        suggItems = Array.from(sugg.querySelectorAll('.sugg-item[data-symbol]:not(.already-added)'));
         suggItems.forEach(item => {
           item.addEventListener('mousedown', e => {
             e.preventDefault(); // prevent blur before click
@@ -892,7 +908,7 @@ function pickStock(ticker, name) {
 
 // ---- mutations ----
 function addStock(ticker, name, category) {
-  if (portfolio.stocks.find(s => s.ticker === ticker)) { toast('err', 'Ticker already exists'); return; }
+  if (portfolio.stocks.find(s => s.ticker === ticker)) { toast('err', `${ticker} est déjà dans votre portfolio`); return; }
   portfolio.stocks.push({ ticker, name, category: category || '' });
   setDirty(true); render(); applyQuotes();
   if (!quotes[ticker]) {
@@ -978,7 +994,7 @@ function startCategoryRename(span) {
   wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center';
   const input = document.createElement('input');
   input.className = 'cat-rename-input';
-  input.value = cat && cat.emoji ? `${cat.emoji} ${oldName}` : oldName;
+  input.value = cat && cat.emoji ? `${toEmoji(cat.emoji)} ${oldName}` : oldName;
   const suggDiv = document.createElement('div');
   suggDiv.className = 'emoji-sugg';
   wrap.appendChild(input);
