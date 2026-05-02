@@ -619,6 +619,31 @@ func (s *Server) putReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) getPrompt(w http.ResponseWriter, r *http.Request) {
+	content, err := s.store.GetPrompt(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"content": content})
+}
+
+func (s *Server) putPrompt(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.store.PutPrompt(r.Context(), userIDFromCtx(r), body.Content); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	// Portfolio is persisted immediately on every write — nothing to do.
 	w.Header().Set("Content-Type", "application/json")
@@ -766,6 +791,17 @@ func (s *Server) routes() http.Handler {
 			s.getReport(w, r)
 		case http.MethodPut:
 			s.putReport(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/prompt", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getPrompt(w, r)
+		case http.MethodPut:
+			s.putPrompt(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

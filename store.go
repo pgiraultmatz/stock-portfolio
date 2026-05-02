@@ -55,6 +55,8 @@ type Store interface {
 	GetPortfolio(ctx context.Context, userID string) ([]Stock, []Category, error)
 	GetReportConfig(ctx context.Context, userID string) ([]XGroup, error)
 	PutReportConfig(ctx context.Context, userID string, groups []XGroup) error
+	GetPrompt(ctx context.Context, userID string) (string, error)
+	PutPrompt(ctx context.Context, userID string, content string) error
 	GetNitterInstances(ctx context.Context, userID string) []string
 	PutStock(ctx context.Context, userID string, s Stock) error
 	DeleteStock(ctx context.Context, userID, ticker string) error
@@ -575,6 +577,43 @@ func (d *DynamoStore) PutReportConfig(ctx context.Context, userID string, groups
 	item, err := attributevalue.MarshalMap(map[string]any{
 		"PK": "USER#" + userID, "SK": "REPORT_CONFIG",
 		"XGroups": groups,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = d.client.PutItem(ctx, &dynamodb.PutItemInput{TableName: &d.table, Item: item})
+	return err
+}
+
+// ---- Prompt ----
+
+func (d *DynamoStore) GetPrompt(ctx context.Context, userID string) (string, error) {
+	result, err := d.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: &d.table,
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: "USER#" + userID},
+			"SK": &types.AttributeValueMemberS{Value: "PROMPT"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if result.Item == nil {
+		return "", nil
+	}
+	var row struct {
+		Content string `dynamodbav:"Content"`
+	}
+	if err := attributevalue.UnmarshalMap(result.Item, &row); err != nil {
+		return "", err
+	}
+	return row.Content, nil
+}
+
+func (d *DynamoStore) PutPrompt(ctx context.Context, userID string, content string) error {
+	item, err := attributevalue.MarshalMap(map[string]any{
+		"PK": "USER#" + userID, "SK": "PROMPT",
+		"Content": content,
 	})
 	if err != nil {
 		return err

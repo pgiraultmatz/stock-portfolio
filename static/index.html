@@ -43,6 +43,21 @@
     .nav-tab:hover { color: #c9d1d9; }
     .nav-tab.active { color: #e6edf3; border-bottom-color: #388bfd; }
 
+    /* ---- my prompt ---- */
+
+    .prompt-textarea {
+      width: 100%; min-height: 300px; background: #0d1117; color: #c9d1d9;
+      border: 1px solid #30363d; border-radius: 8px; padding: 14px;
+      font-family: 'SF Mono', 'Monaco', monospace; font-size: 12px; line-height: 1.6;
+      resize: vertical; box-sizing: border-box; outline: none;
+    }
+    .prompt-textarea:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,0.2); }
+    .prompt-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+    .prompt-save-status { font-size: 12px; }
+    .prompt-save-status.ok  { color: #3fb950; }
+    .prompt-save-status.err { color: #f85149; }
+    .prompt-save-status.saving { color: #8b949e; }
+
     /* ---- report view ---- */
     .report-view {
       max-width: 760px; margin: 0 auto;
@@ -197,6 +212,15 @@
       font-size: 12px; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
     }
     .cat-del-btn:hover { color: #f85149; background: rgba(248,81,73,0.1); }
+
+    .cat-collapse-btn {
+      background: none; border: none; color: #484f58; cursor: pointer;
+      font-size: 10px; padding: 2px 4px; border-radius: 4px; transition: color 0.12s;
+      flex-shrink: 0;
+    }
+    .cat-collapse-btn:hover { color: #8b949e; }
+    .cat-body { overflow: hidden; }
+    .cat-section.collapsed .cat-body { display: none; }
 
     /* ---- stock quotes ---- */
     .stock-quote {
@@ -474,6 +498,16 @@
       <p>Every morning, receive a <strong>curated snapshot</strong> of all your positions — prices, trends, and momentum — paired with an <strong>AI-powered prompt</strong> engineered to help you think deeper, spot patterns, and stay one step ahead.</p>
     </div>
     <div class="report-section">
+      <div class="report-section-title">✏️ My Prompt</div>
+      <p class="report-section-desc">Customize the AI analysis prompt. Changes are saved directly to your Gist.</p>
+      <textarea id="promptTextarea" class="prompt-textarea" spellcheck="false"></textarea>
+      <div class="prompt-actions">
+        <button class="btn btn-primary" onclick="savePrompt()" style="font-size:12px;padding:6px 14px">Save</button>
+        <span id="promptStatus" class="prompt-save-status"></span>
+      </div>
+    </div>
+
+    <div class="report-section">
       <div class="report-section-title">𝕏 Signal Sources</div>
       <p class="report-section-desc">Enrich your daily report with the latest posts from strategic X accounts — <strong>insiders</strong>, <strong>politicians</strong>, <strong>quantitative analysts</strong>, and <strong>traders</strong> — to sharpen your market intelligence.</p>
       <div class="x-groups" id="x-groups"></div>
@@ -488,6 +522,7 @@
 let portfolio = { stocks: [], categories: [] };
 let xGroups = [];
 let dirty = false;
+let collapsedCats = new Set(JSON.parse(localStorage.getItem('collapsedCats') || '[]'));
 
 function switchView(view, push = true) {
   document.getElementById('view-stocks').style.display = view === 'stocks' ? '' : 'none';
@@ -571,13 +606,18 @@ async function fetchQuotes(force = false) {
 
 // ---- load ----
 async function load() {
-  const [portfolioRes, reportRes] = await Promise.all([
+  const [portfolioRes, reportRes, promptRes] = await Promise.all([
     fetch('/api/portfolio'),
     fetch('/api/report'),
+    fetch('/api/prompt'),
   ]);
   portfolio = await portfolioRes.json();
   const reportData = await reportRes.json();
   xGroups = reportData.xGroups || [];
+  if (promptRes.ok) {
+    const promptData = await promptRes.json();
+    document.getElementById('promptTextarea').value = promptData.content || '';
+  }
   setDirty(false);
   render();
   renderXGroups();
@@ -602,17 +642,21 @@ function render() {
   // Category sections
   for (const cat of sorted) {
     const stocks = portfolio.stocks.filter(s => s.category === cat.name);
-    html += `<div class="cat-section drop-zone" data-cat="${esc(cat.name)}">
+    const collapsed = collapsedCats.has(cat.name);
+    html += `<div class="cat-section drop-zone${collapsed ? ' collapsed' : ''}" data-cat="${esc(cat.name)}">
   <div class="cat-header" draggable="true" data-drag-cat="${esc(cat.name)}">
     <span class="drag-handle" style="font-size:14px;margin-right:4px">⠿</span>
+    <button class="cat-collapse-btn" data-collapse-cat="${esc(cat.name)}" title="Collapse / Expand" draggable="false">${collapsed ? '▶' : '▼'}</button>
     <span class="cat-emoji">${toEmoji(cat.emoji)}</span>
     <span class="cat-name" data-rename-cat="${esc(cat.name)}" title="Double-click to rename">${esc(cat.name)}</span>
     <span class="cat-count">${stocks.length}</span>
     <button class="cat-del-btn" data-del-cat="${esc(cat.name)}">✕</button>
   </div>
+  <div class="cat-body">
   ${stocks.length === 0
     ? '<div class="empty-cat">Drop stocks here</div>'
     : stocks.map(stockRowHTML).join('')}
+  </div>
 </div>`;
   }
 
@@ -647,11 +691,23 @@ function initPortfolioClicks() {
     if (delTicker) { deleteStock(delTicker.dataset.delTicker); return; }
     const delCat = e.target.closest('[data-del-cat]');
     if (delCat) { deleteCategory(delCat.dataset.delCat); return; }
+    const collapseCat = e.target.closest('[data-collapse-cat]');
+    if (collapseCat) { toggleCollapseCategory(collapseCat.dataset.collapseCat); return; }
   });
   el.addEventListener('dblclick', e => {
     const span = e.target.closest('[data-rename-cat]');
     if (span) startCategoryRename(span);
   });
+}
+
+function toggleCollapseCategory(name) {
+  if (collapsedCats.has(name)) {
+    collapsedCats.delete(name);
+  } else {
+    collapsedCats.add(name);
+  }
+  localStorage.setItem('collapsedCats', JSON.stringify([...collapsedCats]));
+  render();
 }
 
 function bindPortfolioEvents() {
@@ -1214,6 +1270,31 @@ async function saveXGroups() {
     body: JSON.stringify({ xGroups }),
   });
   if (!res.ok) { toast('err', 'Failed to save'); }
+}
+
+async function savePrompt() {
+  const status = document.getElementById('promptStatus');
+  const content = document.getElementById('promptTextarea').value;
+  status.textContent = 'Saving…';
+  status.className = 'prompt-save-status saving';
+  try {
+    const res = await fetch('/api/prompt', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (res.ok) {
+      status.textContent = '✓ Saved';
+      status.className = 'prompt-save-status ok';
+      setTimeout(() => { status.textContent = ''; }, 3000);
+    } else {
+      status.textContent = '✗ Error';
+      status.className = 'prompt-save-status err';
+    }
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'prompt-save-status err';
+  }
 }
 
 let confirmResolve = null;

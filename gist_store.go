@@ -18,14 +18,15 @@ const githubGistAPI = "https://api.github.com/gists/"
 // GistStore implements Store using a GitHub Gist as a single-user backend.
 // Auth and session methods are stubs — the server bypasses requireAuth in gist mode.
 type GistStore struct {
-	mu           sync.RWMutex
-	gistID       string
-	githubToken  string
-	gistFilename string
-	rawConfig    map[string]json.RawMessage // preserves all unknown fields
-	stocks       []Stock
-	categories   []Category
-	xGroups      []XGroup
+	mu            sync.RWMutex
+	gistID        string
+	githubToken   string
+	gistFilename  string
+	rawConfig     map[string]json.RawMessage // preserves all unknown fields
+	stocks        []Stock
+	categories    []Category
+	xGroups       []XGroup
+	promptContent string
 }
 
 func NewGistStore(_ context.Context) (*GistStore, error) {
@@ -99,6 +100,9 @@ func (s *GistStore) load() error {
 		if json.Unmarshal(v, &handles) == nil && len(handles) > 0 {
 			s.xGroups = []XGroup{{Name: "General", Accounts: handles}}
 		}
+	}
+	if p, ok := gist.Files["prompt.txt"]; ok {
+		s.promptContent = p.Content
 	}
 	return nil
 }
@@ -271,6 +275,35 @@ func (s *GistStore) PutReportConfig(_ context.Context, _ string, groups []XGroup
 	defer s.mu.Unlock()
 	s.xGroups = groups
 	return s.persist()
+}
+
+// ---- prompt ----
+
+func (s *GistStore) GetPrompt(_ context.Context, _ string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.promptContent, nil
+}
+
+func (s *GistStore) PutPrompt(_ context.Context, _ string, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptContent = content
+	payload, _ := json.Marshal(map[string]any{
+		"files": map[string]any{
+			"prompt.txt": map[string]any{"content": content},
+		},
+	})
+	resp, err := s.gistRequest(http.MethodPatch, string(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github API returned %d: %s", resp.StatusCode, body)
+	}
+	return nil
 }
 
 // ---- auth stubs (bypassed in gist mode) ----
