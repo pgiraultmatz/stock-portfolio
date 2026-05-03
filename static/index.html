@@ -191,9 +191,10 @@
     .unassigned-empty { font-size: 12px; color: #30363d; text-align: center; padding: 6px 0; }
 
     /* ---- category section ---- */
-    .cat-section { margin-bottom: 4px; border-radius: 6px; transition: background 0.15s; }
+    .cat-section { margin-bottom: 4px; padding-bottom: 32px; border-radius: 6px; transition: background 0.15s; }
+    .cat-section.collapsed { padding-bottom: 0; }
     .cat-section.drag-over { background: rgba(56,139,253,0.06); }
-    .cat-section.drag-over .cat-header { border-bottom-color: #388bfd; }
+    .cat-section.drag-over .cat-desc-input { border-bottom-color: #388bfd; }
     .cat-section.cat-insert-before { border-top: 2px solid #388bfd; margin-top: -2px; }
     .cat-section.cat-insert-after  { border-bottom: 2px solid #388bfd; }
 
@@ -206,12 +207,34 @@
     .cat-emoji { font-size: 18px; line-height: 1; }
     .cat-name  { font-size: 15px; font-weight: 700; color: #e6edf3; cursor: text; }
     .cat-rename-input { font-size: 15px; font-weight: 700; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; width: 280px; padding: 0; }
-    .cat-count { font-size: 12px; color: #484f58; margin-left: auto; }
+
     .cat-del-btn {
       background: none; border: none; color: #484f58; cursor: pointer;
       font-size: 12px; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
     }
     .cat-del-btn:hover { color: #f85149; background: rgba(248,81,73,0.1); }
+
+    .cat-score-input {
+      width: 44px; background: none; border: none; border-bottom: 1px solid transparent;
+      color: #388bfd; font-size: 11px; font-family: 'SF Mono', monospace;
+      text-align: center; outline: none; padding: 0 2px;
+      transition: border-color 0.12s; -moz-appearance: textfield;
+      margin-left: auto;
+    }
+    .cat-score-input::-webkit-inner-spin-button,
+    .cat-score-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .cat-score-input::placeholder { color: #30363d; }
+    .cat-score-input:hover, .cat-score-input:focus { border-bottom-color: #388bfd; }
+    .cat-desc-input {
+      display: block; width: 100%; box-sizing: border-box;
+      padding: 12px 0 6px 28px; background: none; border: none; border-bottom: 1px solid #161b22;
+      color: #c9d1d9; font-size: 12px; font-family: inherit; line-height: 1.5;
+      resize: none; overflow: hidden; outline: none;
+      transition: color 0.12s;
+    }
+    .cat-desc-input::placeholder { color: #484f58; }
+    .cat-desc-input:hover { color: #c9d1d9; }
+    .cat-desc-input:focus { color: #c9d1d9; border-bottom-color: #30363d; }
 
     .cat-collapse-btn {
       background: none; border: none; color: #484f58; cursor: pointer;
@@ -254,7 +277,7 @@
     .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
 
     /* ---- add category ---- */
-    .add-cat-bar { margin-top: 24px; }
+    .add-cat-bar { margin-top: 24px; margin-bottom: 24px; }
     .add-cat-bar input {
       width: 100%; padding: 8px 12px;
       background: transparent; border: none; border-bottom: 1px dashed #30363d;
@@ -639,6 +662,14 @@ function render() {
   let html = '';
 
 
+  // Add category
+  html += `<div class="add-cat-bar">
+  <div class="emoji-wrap" style="flex:1;max-width:280px">
+    <input type="text" id="ncat-input" placeholder="+ Add category  —  type : for emoji" autocomplete="off" />
+    <div class="emoji-sugg" id="emoji-sugg"></div>
+  </div>
+</div>`;
+
   // Category sections
   for (const cat of sorted) {
     const stocks = portfolio.stocks.filter(s => s.category === cat.name);
@@ -649,24 +680,17 @@ function render() {
     <button class="cat-collapse-btn" data-collapse-cat="${esc(cat.name)}" title="Collapse / Expand" draggable="false">${collapsed ? '▶' : '▼'}</button>
     <span class="cat-emoji">${toEmoji(cat.emoji)}</span>
     <span class="cat-name" data-rename-cat="${esc(cat.name)}" title="Double-click to rename">${esc(cat.name)}</span>
-    <span class="cat-count">${stocks.length}</span>
+    <input class="cat-score-input" type="number" data-score-cat="${esc(cat.name)}" placeholder="Narrative score" step="0.1" min="0" max="10" value="${cat.narrativeScore != null ? cat.narrativeScore : ''}" title="Narrative score" draggable="false">
     <button class="cat-del-btn" data-del-cat="${esc(cat.name)}">✕</button>
   </div>
   <div class="cat-body">
+  <textarea class="cat-desc-input" data-desc-cat="${esc(cat.name)}" placeholder="Add a description…">${esc(cat.description || '')}</textarea>
   ${stocks.length === 0
     ? '<div class="empty-cat">Drop stocks here</div>'
     : stocks.map(stockRowHTML).join('')}
   </div>
 </div>`;
   }
-
-  // Add category
-  html += `<div class="add-cat-bar">
-  <div class="emoji-wrap" style="flex:1;max-width:280px">
-    <input type="text" id="ncat-input" placeholder="+ Add category  —  type : for emoji" autocomplete="off" />
-    <div class="emoji-sugg" id="emoji-sugg"></div>
-  </div>
-</div>`;
 
   document.getElementById('portfolio').innerHTML = html;
   bindPortfolioEvents();
@@ -712,6 +736,25 @@ function toggleCollapseCategory(name) {
 
 function bindPortfolioEvents() {
   const el = document.getElementById('portfolio');
+
+  // Inline description + score fields
+  el.querySelectorAll('.cat-desc-input[data-desc-cat]').forEach(ta => {
+    autoResizeTextarea(ta);
+    ta.addEventListener('input', () => {
+      autoResizeTextarea(ta);
+      const cat = portfolio.categories.find(c => c.name === ta.dataset.descCat);
+      if (cat) { cat.description = ta.value; setDirty(true); }
+    });
+  });
+  el.querySelectorAll('.cat-score-input[data-score-cat]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const cat = portfolio.categories.find(c => c.name === inp.dataset.scoreCat);
+      if (!cat) return;
+      const v = inp.value.trim();
+      cat.narrativeScore = v !== '' ? parseFloat(v) : undefined;
+      setDirty(true);
+    });
+  });
 
   // Drag start/end on stock rows
   el.querySelectorAll('.stock-row[data-ticker]').forEach(row => {
@@ -958,8 +1001,9 @@ function pickStock(ticker, name) {
   inp.value = '';
   suggIdx = -1;
   const sorted = [...portfolio.categories].sort((a, b) => a.order - b.order);
-  const lastCat = sorted.length ? sorted[sorted.length - 1].name : '';
-  addStock(ticker, name, lastCat);
+  const firstExpanded = sorted.find(c => !collapsedCats.has(c.name));
+  const targetCat = (firstExpanded || sorted[0])?.name || '';
+  addStock(ticker, name, targetCat);
 }
 
 // ---- mutations ----
@@ -1019,8 +1063,8 @@ async function createCategory() {
   const emoji = emojiMatch ? emojiMatch[1].trim() : '';
   const name  = emojiMatch ? emojiMatch[2].trim() : raw;
   if (portfolio.categories.find(c => c.name === name)) { toast('err', 'Category already exists'); return; }
-  const maxOrder = portfolio.categories.reduce((m, c) => Math.max(m, c.order), 0);
-  portfolio.categories.push({ name, emoji, order: maxOrder + 1 });
+  const minOrder = portfolio.categories.reduce((m, c) => Math.min(m, c.order), 0);
+  portfolio.categories.push({ name, emoji, order: minOrder - 1 });
   setDirty(true); render();
   const inp = document.getElementById('ncat-input');
   if (inp) inp.value = '';
@@ -1295,6 +1339,11 @@ async function savePrompt() {
     status.textContent = '✗ ' + e.message;
     status.className = 'prompt-save-status err';
   }
+}
+
+function autoResizeTextarea(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
 }
 
 let confirmResolve = null;

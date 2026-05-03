@@ -391,10 +391,17 @@ func (d *DynamoStore) ReplaceStocks(ctx context.Context, userID string, stocks [
 }
 
 func (d *DynamoStore) PutCategory(ctx context.Context, userID string, c Category) error {
-	item, err := attributevalue.MarshalMap(map[string]any{
+	catMap := map[string]any{
 		"PK": "USER#" + userID, "SK": "CATEGORY#" + c.Name,
 		"Name": c.Name, "Emoji": c.Emoji, "Order": c.Order,
-	})
+	}
+	if c.Description != "" {
+		catMap["Description"] = c.Description
+	}
+	if c.NarrativeScore != nil {
+		catMap["NarrativeScore"] = *c.NarrativeScore
+	}
+	item, err := attributevalue.MarshalMap(catMap)
 	if err != nil {
 		return err
 	}
@@ -447,17 +454,26 @@ func (d *DynamoStore) RenameCategory(ctx context.Context, userID, oldName, newNa
 		return ErrNotFound
 	}
 	var cat struct {
-		Emoji string `dynamodbav:"Emoji"`
-		Order int    `dynamodbav:"Order"`
+		Emoji          string   `dynamodbav:"Emoji"`
+		Order          int      `dynamodbav:"Order"`
+		Description    string   `dynamodbav:"Description"`
+		NarrativeScore *float64 `dynamodbav:"NarrativeScore"`
 	}
 	if err := attributevalue.UnmarshalMap(result.Item, &cat); err != nil {
 		return err
 	}
 	// Create new category item
-	newItem, err := attributevalue.MarshalMap(map[string]any{
+	newCatMap := map[string]any{
 		"PK": pk, "SK": "CATEGORY#" + newName,
 		"Name": newName, "Emoji": cat.Emoji, "Order": cat.Order,
-	})
+	}
+	if cat.Description != "" {
+		newCatMap["Description"] = cat.Description
+	}
+	if cat.NarrativeScore != nil {
+		newCatMap["NarrativeScore"] = *cat.NarrativeScore
+	}
+	newItem, err := attributevalue.MarshalMap(newCatMap)
 	if err != nil {
 		return err
 	}
@@ -518,10 +534,17 @@ func (d *DynamoStore) ReplaceCategories(ctx context.Context, userID string, cats
 	if len(cats) > 0 {
 		puts := make([]types.WriteRequest, len(cats))
 		for i, c := range cats {
-			item, _ := attributevalue.MarshalMap(map[string]any{
+			replMap := map[string]any{
 				"PK": pk, "SK": "CATEGORY#" + c.Name,
 				"Name": c.Name, "Emoji": c.Emoji, "Order": c.Order,
-			})
+			}
+			if c.Description != "" {
+				replMap["Description"] = c.Description
+			}
+			if c.NarrativeScore != nil {
+				replMap["NarrativeScore"] = *c.NarrativeScore
+			}
+			item, _ := attributevalue.MarshalMap(replMap)
 			puts[i] = types.WriteRequest{PutRequest: &types.PutRequest{Item: item}}
 		}
 		if err := d.batchWrite(ctx, puts); err != nil {

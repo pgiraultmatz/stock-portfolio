@@ -34,9 +34,11 @@ type Stock struct {
 }
 
 type Category struct {
-	Name  string `json:"name"`
-	Emoji string `json:"emoji"`
-	Order int    `json:"order"`
+	Name           string   `json:"name"`
+	Emoji          string   `json:"emoji"`
+	Order          int      `json:"order"`
+	Description    string   `json:"description,omitempty"`
+	NarrativeScore *float64 `json:"narrativeScore,omitempty"`
 }
 
 type contextKey string
