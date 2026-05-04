@@ -173,6 +173,7 @@
     .btn-del {
       background: none; border: none; color: #484f58; cursor: pointer;
       font-size: 14px; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
+      flex-shrink: 0;
     }
     .btn-del:hover { color: #f85149; background: rgba(248,81,73,0.1); }
 
@@ -248,7 +249,7 @@
     /* ---- metrics row ---- */
     .metrics-row {
       display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
-      padding: 4px 0 8px 36px; border-bottom: 1px solid #161b22;
+      padding: 10px 0 8px 0; gap: 6px 28px;
       font-size: 11px; font-family: 'SF Mono', monospace; color: #8b949e;
     }
     .metric-cell { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -261,23 +262,23 @@
     .rsi-neutral         { color: #8b949e; }
     .rsi-momentum        { color: #58a6ff; }
     .rsi-extended        { color: #d29922; }
-    .rsi-overbought      { color: #f0883e; }
+    .rsi-overbought      { color: #f85149; }
     .rsi-very-overbought { color: #f85149; }
     /* Valuation / PEG */
     .val-under      { color: #3fb950; }
     .val-reasonable { color: #56d364; }
     .val-fair       { color: #8b949e; }
-    .val-expensive  { color: #d29922; }
+    .val-expensive  { color: #f0883e; }
     .val-over       { color: #f85149; }
     /* PSG */
     .psg-very-attractive { color: #3fb950; }
     .psg-reasonable      { color: #56d364; }
-    .psg-expensive       { color: #d29922; }
+    .psg-expensive       { color: #f0883e; }
     .psg-very-expensive  { color: #f85149; }
     /* EV/GP */
     .evgp-attractive    { color: #3fb950; }
     .evgp-reasonable    { color: #56d364; }
-    .evgp-expensive     { color: #d29922; }
+    .evgp-expensive     { color: #f0883e; }
     .evgp-very-expensive { color: #f85149; }
     /* Earnings */
     .earnings-soon     { color: #f85149; font-weight: 700; }
@@ -289,7 +290,7 @@
     .signal-accumulate  { color: #58a6ff; }
     .signal-hold        { color: #8b949e; }
     .signal-light-trim  { color: #d29922; }
-    .signal-trim        { color: #f0883e; font-weight: 700; }
+    .signal-trim        { color: #d29922; }
     .signal-sell        { color: #f85149; font-weight: 700; }
     .signal-strong-sell { color: #da3633; font-weight: 700; }
     .target-up   { color: #3fb950; }
@@ -298,19 +299,23 @@
     /* ---- stock quotes ---- */
     .stock-quote {
       font-size: 12px; font-family: 'SF Mono', monospace;
-      display: inline-flex; align-items: baseline; gap: 5px;
-      color: #8b949e; margin-left: 6px;
+      display: flex; align-items: baseline; gap: 5px;
+      color: #8b949e; margin-left: 10px; white-space: nowrap; flex-shrink: 0;
     }
     .q-price { color: #c9d1d9; }
     .q-change { font-weight: 600; }
     .q-change.up   { color: #3fb950; }
     .q-change.down { color: #f85149; }
     .q-stale { font-size: 10px; color: #484f58; }
+    .sq-earnings { font-size: 11px; font-family: 'SF Mono', monospace; font-weight: 600; white-space: nowrap; flex-shrink: 0; margin-left: 10px; }
+    .sq-signal   { font-size: 11px; font-family: 'SF Mono', monospace; white-space: nowrap; flex-shrink: 0; margin-left: 8px; }
+    .sq-note     { font-size: 10px; font-weight: 400; color: #d29922; }
 
     /* ---- stock rows ---- */
+    .stock-item { border-bottom: 1px solid #161b22; }
     .stock-row {
       display: flex; align-items: center;
-      padding: 7px 0 7px 28px; border-bottom: 1px solid #161b22;
+      padding: 7px 0 7px 28px;
       cursor: grab; border-radius: 4px; transition: background 0.1s, opacity 0.1s;
     }
     .stock-row:active { cursor: grabbing; }
@@ -319,10 +324,36 @@
     .stock-row.insert-before { border-top: 2px solid #388bfd !important; }
     .stock-row.insert-after  { border-bottom: 2px solid #388bfd !important; }
     .drag-handle { color: #30363d; font-size: 13px; margin-right: 8px; user-select: none; }
-    .stock-name   { flex: 1; font-size: 13px; color: #c9d1d9; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stock-name   { font-size: 13px; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; flex-shrink: 0; }
     .stock-ticker { font-size: 12px; font-weight: 400; color: #8b949e; font-family: 'SF Mono', monospace; text-decoration: none; }
     .stock-ticker:hover { color: #79c0ff; text-decoration: underline; }
     .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
+    /* ---- stock detail (expandable) ---- */
+    .stock-detail { display: none; padding: 0 28px 10px 36px; }
+    .stock-detail.expanded { display: block; }
+    .sq-toggle {
+      background: none; border: none; cursor: pointer; padding: 2px 5px;
+      color: #484f58; font-size: 11px; line-height: 1; transition: color 0.15s;
+      margin-right: 2px; flex-shrink: 0;
+    }
+    .sq-toggle:hover, .sq-toggle.open { color: #8b949e; }
+    .sq-copy {
+      background: none; border: none; cursor: pointer; padding: 2px 4px;
+      color: #484f58; line-height: 1; transition: color 0.15s; flex-shrink: 0;
+      display: inline-flex; align-items: center; margin-left: 8px;
+    }
+    .sq-copy:hover { color: #8b949e; }
+    .sq-copy.copied { color: #388bfd; transition: color 0s; }
+    .sq-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .stock-note-input {
+      width: 100%; box-sizing: border-box; margin-top: 6px;
+      background: transparent; border: none; border-bottom: 1px dashed #30363d;
+      color: #8b949e; font-size: 12px; font-family: inherit; line-height: 1.5;
+      padding: 4px 0; outline: none; resize: none; overflow: hidden;
+      min-height: 28px;
+    }
+    .stock-note-input::placeholder { color: #30363d; }
+    .stock-note-input:focus { color: #c9d1d9; border-bottom-color: #388bfd; }
 
     /* ---- add category ---- */
     .add-cat-bar { margin-top: 24px; margin-bottom: 24px; }
@@ -595,6 +626,7 @@ let xGroups = [];
 let dirty = false;
 let metrics = {}; // ticker → StockMetrics
 let collapsedCats = new Set(JSON.parse(localStorage.getItem('collapsedCats') || '[]'));
+let expandedStocks = new Set(JSON.parse(localStorage.getItem('expandedStocks') || '[]'));
 
 function switchView(view, push = true) {
   document.getElementById('view-stocks').style.display = view === 'stocks' ? '' : 'none';
@@ -767,14 +799,36 @@ function render() {
   applyQuotes();
 }
 
+function stockPriorityHTML(ticker) {
+  const m = metrics[ticker];
+  if (!m || m.error) return '';
+  const parts = [];
+  if (m.earnings) parts.push(`<span class="sq-earnings ${m.earningsClass}">${esc(m.earnings)}</span>`);
+  if (m.signal) {
+    const sigCls = m.signalNote === 'WAIT EARNINGS' ? 'signal-light-trim' : m.signalClass;
+    parts.push(`<span class="${sigCls} sq-signal">${m.signal}${m.signalNote ? ` <span class="sq-note">(${esc(m.signalNote)})</span>` : ''}</span>`);
+  }
+  return parts.join('');
+}
+
 function stockRowHTML(s) {
-  return `<div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
+  const expanded = expandedStocks.has(s.ticker);
+  return `<div class="stock-item">
+<div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
-  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a> <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span></span>
+  <button class="sq-toggle${expanded ? ' open' : ''}" data-expand-ticker="${esc(s.ticker)}" draggable="false">${expanded ? '▾' : '▸'}</button>
+  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a></span>
+  <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
+  ${stockPriorityHTML(s.ticker)}
+  <button class="sq-copy" data-copy-ticker="${esc(s.ticker)}" draggable="false" title="Copy stock data"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
   <span style="flex:1"></span>
   <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
 </div>
-${metricsRowHTML(s.ticker)}`;
+<div class="stock-detail${expanded ? ' expanded' : ''}" data-detail-ticker="${esc(s.ticker)}">
+  <textarea class="stock-note-input" data-note-ticker="${esc(s.ticker)}" placeholder="Add a note about this stock — thesis, key risks, why you're holding…" rows="1">${esc(s.note || '')}</textarea>
+  ${metricsRowHTML(s.ticker)}
+</div>
+</div>`;
 }
 
 function metricsRowHTML(ticker) {
@@ -786,13 +840,11 @@ function metricsRowHTML(ticker) {
   const tgtCls = m.targetPct >= 0 ? 'target-up' : 'target-down';
 
   const parts = [];
-  if (m.rsi)       parts.push(`<span class="metric-cell"><span class="metric-key">RSI</span> <span class="metric-val">${m.rsi.toFixed(1)}</span> <span class="${m.rsiClass}">${m.rsiLabel}</span></span>`);
-  if (m.targetPrice) parts.push(`<span class="metric-cell"><span class="metric-key">Analyst Target</span> <span class="metric-val">${esc(m.targetPrice)}</span> <span class="${tgtCls}">${sign}${m.targetPct.toFixed(1)}%</span></span>`);
-  if (m.pegRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PEG</span> <span class="metric-val">${m.pegRatio.toFixed(2)}</span> <span class="${m.pegClass}">${m.pegLabel}</span></span>`);
-  if (m.psgRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PSG</span> <span class="metric-val">${m.psgRatio.toFixed(2)}</span> <span class="${m.psgClass}">${m.psgLabel}</span></span>`);
-  if (m.evgpRatio) parts.push(`<span class="metric-cell"><span class="metric-key">EV/GP</span> <span class="metric-val">${m.evgpRatio.toFixed(1)}x</span> <span class="${m.evgpClass}">${m.evgpLabel}</span></span>`);
-  if (m.earnings)  parts.push(`<span class="metric-cell ${m.earningsClass}"><span class="metric-key">Earnings</span> <span class="metric-val">${esc(m.earnings)}</span></span>`);
-  if (m.signal)    parts.push(`<span class="metric-cell"><span class="${m.signalClass}">${m.signal}${m.signalNote ? ` <span style="color:#f0883e;font-size:10px;font-weight:600">(${esc(m.signalNote)})</span>` : ''}</span></span>`);
+  if (m.rsi)       parts.push(`<span class="metric-cell"><span class="metric-key">RSI:</span> <span class="metric-val">${m.rsi.toFixed(1)}</span> <span class="${m.rsiClass}">${m.rsiLabel}</span></span>`);
+  if (m.targetPrice) parts.push(`<span class="metric-cell"><span class="metric-key">Analyst Target:</span> <span class="metric-val">${esc(m.targetPrice)}</span> <span class="${tgtCls}">${sign}${m.targetPct.toFixed(1)}%</span></span>`);
+  if (m.pegRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PEG:</span> <span class="metric-val">${m.pegRatio.toFixed(2)}</span> <span class="${m.pegClass}">${m.pegLabel}</span></span>`);
+  if (m.psgRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PSG:</span> <span class="metric-val">${m.psgRatio.toFixed(2)}</span> <span class="${m.psgClass}">${m.psgLabel}</span></span>`);
+  if (m.evgpRatio) parts.push(`<span class="metric-cell"><span class="metric-key">EV/GP:</span> <span class="metric-val">${m.evgpRatio.toFixed(1)}x</span> <span class="${m.evgpClass}">${m.evgpLabel}</span></span>`);
 
   return `<div class="metrics-row">${parts.join('')}</div>`;
 }
@@ -807,6 +859,10 @@ function initPortfolioClicks() {
     if (delCat) { deleteCategory(delCat.dataset.delCat); return; }
     const collapseCat = e.target.closest('[data-collapse-cat]');
     if (collapseCat) { toggleCollapseCategory(collapseCat.dataset.collapseCat); return; }
+    const expandStock = e.target.closest('[data-expand-ticker]');
+    if (expandStock) { toggleStockExpand(expandStock.dataset.expandTicker); return; }
+    const copyStock = e.target.closest('[data-copy-ticker]');
+    if (copyStock) { copyStockData(copyStock.dataset.copyTicker); return; }
   });
   el.addEventListener('dblclick', e => {
     const span = e.target.closest('[data-rename-cat]');
@@ -822,6 +878,42 @@ function toggleCollapseCategory(name) {
   }
   localStorage.setItem('collapsedCats', JSON.stringify([...collapsedCats]));
   render();
+}
+
+function toggleStockExpand(ticker) {
+  const wasExpanded = expandedStocks.has(ticker);
+  if (wasExpanded) expandedStocks.delete(ticker); else expandedStocks.add(ticker);
+  localStorage.setItem('expandedStocks', JSON.stringify([...expandedStocks]));
+  const detail = document.querySelector(`.stock-detail[data-detail-ticker="${CSS.escape(ticker)}"]`);
+  const btn    = document.querySelector(`[data-expand-ticker="${CSS.escape(ticker)}"]`);
+  if (detail) detail.classList.toggle('expanded', !wasExpanded);
+  if (btn) { btn.classList.toggle('open', !wasExpanded); btn.textContent = wasExpanded ? '▸' : '▾'; }
+}
+
+function copyStockData(ticker) {
+  const s = portfolio.stocks.find(s => s.ticker === ticker);
+  const m = metrics[ticker];
+  const q = quotes[ticker];
+  const lines = [];
+
+  lines.push(`${s?.name || ticker} (${ticker})`);
+
+  if (q) {
+    const sign = q.change >= 0 ? '+' : '';
+    lines.push(`Price: ${formatPrice(q.price, q.currency)}  ${sign}${q.change.toFixed(2)}%`);
+  }
+
+  if (m && !m.error) {
+    if (m.signal) lines.push(`Signal: ${m.signal}${m.signalNote ? ` (${m.signalNote})` : ''}`);
+    if (m.earnings) lines.push(`Earnings: ${m.earnings}`);
+  }
+
+  if (s?.note) { lines.push(''); lines.push(s.note); }
+
+  const btn = document.querySelector(`[data-copy-ticker="${CSS.escape(ticker)}"]`);
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    if (btn) { btn.classList.add('copied'); setTimeout(() => btn.classList.remove('copied'), 100); }
+  }).catch(() => {});
 }
 
 function bindPortfolioEvents() {
@@ -843,6 +935,14 @@ function bindPortfolioEvents() {
       const v = inp.value.trim();
       cat.narrativeScore = v !== '' ? parseFloat(v) : undefined;
       setDirty(true);
+    });
+  });
+
+  el.querySelectorAll('.stock-note-input[data-note-ticker]').forEach(ta => {
+    ta.addEventListener('input', () => {
+      autoResizeTextarea(ta);
+      const s = portfolio.stocks.find(s => s.ticker === ta.dataset.noteTicker);
+      if (s) { s.note = ta.value; setDirty(true); }
     });
   });
 
