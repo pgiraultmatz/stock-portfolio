@@ -792,7 +792,7 @@ function metricsRowHTML(ticker) {
   if (m.psgRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PSG</span> <span class="metric-val">${m.psgRatio.toFixed(2)}</span> <span class="${m.psgClass}">${m.psgLabel}</span></span>`);
   if (m.evgpRatio) parts.push(`<span class="metric-cell"><span class="metric-key">EV/GP</span> <span class="metric-val">${m.evgpRatio.toFixed(1)}x</span> <span class="${m.evgpClass}">${m.evgpLabel}</span></span>`);
   if (m.earnings)  parts.push(`<span class="metric-cell ${m.earningsClass}"><span class="metric-key">Earnings</span> <span class="metric-val">${esc(m.earnings)}</span></span>`);
-  if (m.signal)    parts.push(`<span class="metric-cell"><span class="${m.signalClass}">${m.signal}</span>${m.signalNote ? ` <span style="color:#f0883e;font-size:10px;font-weight:600">${esc(m.signalNote)}</span>` : ''}</span>`);
+  if (m.signal)    parts.push(`<span class="metric-cell"><span class="${m.signalClass}">${m.signal}${m.signalNote ? ` <span style="color:#f0883e;font-size:10px;font-weight:600">(${esc(m.signalNote)})</span>` : ''}</span></span>`);
 
   return `<div class="metrics-row">${parts.join('')}</div>`;
 }

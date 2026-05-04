@@ -17,6 +17,25 @@ const githubGistAPI = "https://api.github.com/gists/"
 
 // GistStore implements Store using a GitHub Gist as a single-user backend.
 // Auth and session methods are stubs — the server bypasses requireAuth in gist mode.
+// StockFundamentals holds pre-calculated data written by stock-checker.
+type StockFundamentals struct {
+	RSI           float64 `json:"rsi,omitempty"`
+	TargetPrice   float64 `json:"target_price,omitempty"`
+	TargetPct     float64 `json:"target_pct,omitempty"`
+	PEGRatio      float64 `json:"peg_ratio,omitempty"`
+	PSGRatio      float64 `json:"psg_ratio,omitempty"`
+	EVGrossProfit float64 `json:"ev_gross_profit,omitempty"`
+	NextEarnings  string  `json:"next_earnings,omitempty"`
+	Signal        string  `json:"signal,omitempty"`
+	SignalNote    string  `json:"signal_note,omitempty"`
+}
+
+// StockDataFile mirrors the stock-data.json written by stock-checker.
+type StockDataFile struct {
+	UpdatedAt time.Time                    `json:"updated_at"`
+	Stocks    map[string]StockFundamentals `json:"stocks"`
+}
+
 type GistStore struct {
 	mu            sync.RWMutex
 	gistID        string
@@ -27,6 +46,7 @@ type GistStore struct {
 	categories    []Category
 	xGroups       []XGroup
 	promptContent string
+	stockData     *StockDataFile
 }
 
 func NewGistStore(_ context.Context) (*GistStore, error) {
@@ -104,7 +124,19 @@ func (s *GistStore) load() error {
 	if p, ok := gist.Files["prompt.txt"]; ok {
 		s.promptContent = p.Content
 	}
+	if d, ok := gist.Files["stock-data.json"]; ok {
+		var sd StockDataFile
+		if err := json.Unmarshal([]byte(d.Content), &sd); err == nil {
+			s.stockData = &sd
+		}
+	}
 	return nil
+}
+
+func (s *GistStore) GetStockData(_ context.Context, _ string) (*StockDataFile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stockData, nil
 }
 
 func (s *GistStore) persist() error {

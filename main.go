@@ -646,6 +646,28 @@ func (s *Server) putPrompt(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) getStockData(w http.ResponseWriter, r *http.Request) {
+	type getter interface {
+		GetStockData(context.Context, string) (*StockDataFile, error)
+	}
+	g, ok := s.store.(getter)
+	if !ok {
+		http.Error(w, "not supported", http.StatusNotImplemented)
+		return
+	}
+	data, err := g.GetStockData(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		http.Error(w, "no data available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
 func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	// Portfolio is persisted immediately on every write — nothing to do.
 	w.Header().Set("Content-Type", "application/json")
@@ -790,6 +812,14 @@ func (s *Server) routes() http.Handler {
 	protected.HandleFunc("/api/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.getMetrics(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/stock-data", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.getStockData(w, r)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
