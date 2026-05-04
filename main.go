@@ -787,6 +787,14 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 
+	protected.HandleFunc("/api/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.getMetrics(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	protected.HandleFunc("/api/report", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

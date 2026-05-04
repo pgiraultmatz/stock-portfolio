@@ -191,7 +191,7 @@
     .unassigned-empty { font-size: 12px; color: #30363d; text-align: center; padding: 6px 0; }
 
     /* ---- category section ---- */
-    .cat-section { margin-bottom: 4px; padding-bottom: 32px; border-radius: 6px; transition: background 0.15s; }
+    .cat-section { margin-bottom: 4px; padding-bottom: 32px; border-radius: 6px; transition: background 0.15s; display: block; width: 100%; box-sizing: border-box; }
     .cat-section.collapsed { padding-bottom: 0; }
     .cat-section.drag-over { background: rgba(56,139,253,0.06); }
     .cat-section.drag-over .cat-desc-input { border-bottom-color: #388bfd; }
@@ -206,7 +206,7 @@
     .cat-header:active { cursor: grabbing; }
     .cat-emoji { font-size: 18px; line-height: 1; }
     .cat-name  { font-size: 15px; font-weight: 700; color: #e6edf3; cursor: text; }
-    .cat-rename-input { font-size: 15px; font-weight: 700; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; width: 280px; padding: 0; }
+    .cat-rename-input { font-size: 15px; font-weight: 700; color: #e6edf3; background: transparent; border: none; border-bottom: 1px solid #388bfd; outline: none; width: 480px; max-width: 100%; padding: 0; }
 
     .cat-del-btn {
       background: none; border: none; color: #484f58; cursor: pointer;
@@ -242,15 +242,64 @@
       flex-shrink: 0;
     }
     .cat-collapse-btn:hover { color: #8b949e; }
-    .cat-body { overflow: hidden; }
+    .cat-body { display: block; width: 100%; box-sizing: border-box; }
     .cat-section.collapsed .cat-body { display: none; }
+
+    /* ---- metrics row ---- */
+    .metrics-row {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+      padding: 4px 0 8px 36px; border-bottom: 1px solid #161b22;
+      font-size: 11px; font-family: 'SF Mono', monospace; color: #8b949e;
+    }
+    .metric-cell { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+    .metric-key  { color: #484f58; }
+    .metric-val  { color: #c9d1d9; font-weight: 600; }
+    .metric-loading { color: #30363d; font-style: italic; }
+    /* RSI classes */
+    .rsi-strong-oversold { color: #3fb950; }
+    .rsi-accumulation    { color: #56d364; }
+    .rsi-neutral         { color: #8b949e; }
+    .rsi-momentum        { color: #58a6ff; }
+    .rsi-extended        { color: #d29922; }
+    .rsi-overbought      { color: #f0883e; }
+    .rsi-very-overbought { color: #f85149; }
+    /* Valuation / PEG */
+    .val-under      { color: #3fb950; }
+    .val-reasonable { color: #56d364; }
+    .val-fair       { color: #8b949e; }
+    .val-expensive  { color: #d29922; }
+    .val-over       { color: #f85149; }
+    /* PSG */
+    .psg-very-attractive { color: #3fb950; }
+    .psg-reasonable      { color: #56d364; }
+    .psg-expensive       { color: #d29922; }
+    .psg-very-expensive  { color: #f85149; }
+    /* EV/GP */
+    .evgp-attractive    { color: #3fb950; }
+    .evgp-reasonable    { color: #56d364; }
+    .evgp-expensive     { color: #d29922; }
+    .evgp-very-expensive { color: #f85149; }
+    /* Earnings */
+    .earnings-soon     { color: #f85149; font-weight: 700; }
+    .earnings-upcoming { color: #d29922; }
+    .earnings-later    { color: #8b949e; }
+    /* Signal */
+    .signal-strong-buy  { color: #3fb950; font-weight: 700; }
+    .signal-buy         { color: #56d364; font-weight: 700; }
+    .signal-accumulate  { color: #58a6ff; }
+    .signal-hold        { color: #8b949e; }
+    .signal-light-trim  { color: #d29922; }
+    .signal-trim        { color: #f0883e; font-weight: 700; }
+    .signal-sell        { color: #f85149; font-weight: 700; }
+    .signal-strong-sell { color: #da3633; font-weight: 700; }
+    .target-up   { color: #3fb950; }
+    .target-down { color: #f85149; }
 
     /* ---- stock quotes ---- */
     .stock-quote {
       font-size: 12px; font-family: 'SF Mono', monospace;
-      display: flex; align-items: baseline; gap: 5px;
-      min-width: 130px; justify-content: flex-end; margin-right: 10px;
-      color: #8b949e;
+      display: inline-flex; align-items: baseline; gap: 5px;
+      color: #8b949e; margin-left: 6px;
     }
     .q-price { color: #c9d1d9; }
     .q-change { font-weight: 600; }
@@ -271,9 +320,8 @@
     .stock-row.insert-after  { border-bottom: 2px solid #388bfd !important; }
     .drag-handle { color: #30363d; font-size: 13px; margin-right: 8px; user-select: none; }
     .stock-name   { flex: 1; font-size: 13px; color: #c9d1d9; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .stock-ticker { font-size: 12px; font-weight: 400; color: #8b949e; font-family: 'SF Mono', monospace; }
-    .tv-link { color: #388bfd; font-size: 12px; padding: 2px 6px; border-radius: 4px; text-decoration: none; transition: color 0.12s, background 0.12s; flex-shrink: 0; }
-    .tv-link:hover { color: #79c0ff; background: rgba(56,139,253,0.1); }
+    .stock-ticker { font-size: 12px; font-weight: 400; color: #8b949e; font-family: 'SF Mono', monospace; text-decoration: none; }
+    .stock-ticker:hover { color: #79c0ff; text-decoration: underline; }
     .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
 
     /* ---- add category ---- */
@@ -545,6 +593,7 @@
 let portfolio = { stocks: [], categories: [] };
 let xGroups = [];
 let dirty = false;
+let metrics = {}; // ticker → StockMetrics
 let collapsedCats = new Set(JSON.parse(localStorage.getItem('collapsedCats') || '[]'));
 
 function switchView(view, push = true) {
@@ -645,9 +694,30 @@ async function load() {
   render();
   renderXGroups();
   fetchQuotes();
+  fetchMetrics();
   if (!quotesTimer) {
     quotesTimer = setInterval(() => fetchQuotes(true), 5 * 60 * 1000);
   }
+}
+
+// ---- metrics ----
+const METRICS_CACHE_KEY = 'metricsCache';
+const METRICS_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
+async function fetchMetrics() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(METRICS_CACHE_KEY) || 'null');
+    if (cached && Date.now() - cached.ts < METRICS_CACHE_TTL) {
+      metrics = cached.data;
+      render();
+      return;
+    }
+    const res = await fetch('/api/metrics');
+    if (!res.ok) return;
+    metrics = await res.json();
+    localStorage.setItem(METRICS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: metrics }));
+    render();
+  } catch (e) { /* silent */ }
 }
 
 // ---- render ----
@@ -684,7 +754,7 @@ function render() {
     <button class="cat-del-btn" data-del-cat="${esc(cat.name)}">✕</button>
   </div>
   <div class="cat-body">
-  <textarea class="cat-desc-input" data-desc-cat="${esc(cat.name)}" placeholder="Add a description…">${esc(cat.description || '')}</textarea>
+  <textarea class="cat-desc-input" data-desc-cat="${esc(cat.name)}" placeholder="Add a description…" style="width:100%">${esc(cat.description || '')}</textarea>
   ${stocks.length === 0
     ? '<div class="empty-cat">Drop stocks here</div>'
     : stocks.map(stockRowHTML).join('')}
@@ -700,11 +770,31 @@ function render() {
 function stockRowHTML(s) {
   return `<div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
-  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <span class="stock-ticker">(${esc(s.ticker)})</span></span>
-  <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
-  <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" title="Open on TradingView" draggable="false">Chart ↗</a>
+  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a> <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span></span>
+  <span style="flex:1"></span>
   <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
-</div>`;
+</div>
+${metricsRowHTML(s.ticker)}`;
+}
+
+function metricsRowHTML(ticker) {
+  const m = metrics[ticker];
+  if (!m) return `<div class="metrics-row"><span class="metric-loading">loading metrics…</span></div>`;
+  if (m.error) return `<div class="metrics-row"><span class="metric-loading" style="color:#484f58">—</span></div>`;
+
+  const sign = m.targetPct >= 0 ? '+' : '';
+  const tgtCls = m.targetPct >= 0 ? 'target-up' : 'target-down';
+
+  const parts = [];
+  if (m.rsi)       parts.push(`<span class="metric-cell"><span class="metric-key">RSI</span> <span class="metric-val">${m.rsi.toFixed(1)}</span> <span class="${m.rsiClass}">${m.rsiLabel}</span></span>`);
+  if (m.targetPrice) parts.push(`<span class="metric-cell"><span class="metric-key">Analyst Target</span> <span class="metric-val">${esc(m.targetPrice)}</span> <span class="${tgtCls}">${sign}${m.targetPct.toFixed(1)}%</span></span>`);
+  if (m.pegRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PEG</span> <span class="metric-val">${m.pegRatio.toFixed(2)}</span> <span class="${m.pegClass}">${m.pegLabel}</span></span>`);
+  if (m.psgRatio)  parts.push(`<span class="metric-cell"><span class="metric-key">PSG</span> <span class="metric-val">${m.psgRatio.toFixed(2)}</span> <span class="${m.psgClass}">${m.psgLabel}</span></span>`);
+  if (m.evgpRatio) parts.push(`<span class="metric-cell"><span class="metric-key">EV/GP</span> <span class="metric-val">${m.evgpRatio.toFixed(1)}x</span> <span class="${m.evgpClass}">${m.evgpLabel}</span></span>`);
+  if (m.earnings)  parts.push(`<span class="metric-cell ${m.earningsClass}"><span class="metric-key">Earnings</span> <span class="metric-val">${esc(m.earnings)}</span></span>`);
+  if (m.signal)    parts.push(`<span class="metric-cell"><span class="${m.signalClass}">${m.signal}</span>${m.signalNote ? ` <span style="color:#f0883e;font-size:10px;font-weight:600">${esc(m.signalNote)}</span>` : ''}</span>`);
+
+  return `<div class="metrics-row">${parts.join('')}</div>`;
 }
 
 // ---- event delegation for portfolio (called ONCE at init) ----
