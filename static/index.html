@@ -63,6 +63,28 @@
       max-width: 760px; margin: 0 auto;
       padding: 32px 24px; box-sizing: border-box;
     }
+    /* ---- calendar view ---- */
+    .cal-month { margin-bottom: 28px; }
+    .cal-month-title {
+      font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase;
+      letter-spacing: 0.08em; padding: 8px 0 6px; border-bottom: 1px solid #21262d;
+      margin-bottom: 4px;
+    }
+    .cal-month:has(.cal-month-title:first-child) { }
+    .cal-month[style*="margin-top"] .cal-month-title { border-top: 1px solid #21262d; padding-top: 20px; }
+    .cal-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 0; border-bottom: 1px solid #161b22; font-size: 13px;
+    }
+    .cal-date { width: 52px; flex-shrink: 0; font-family: 'SF Mono', monospace; font-size: 12px; }
+    .cal-name { flex: 1; color: #c9d1d9; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cal-ticker { font-family: 'SF Mono', monospace; font-size: 11px; color: #8b949e; }
+    .cal-signal { font-size: 11px; font-family: 'SF Mono', monospace; flex-shrink: 0; font-weight: 700; }
+    .cal-empty { font-size: 12px; color: #484f58; padding: 24px 0; text-align: center; }
+    .cal-reminder {
+      font-size: 11px; color: #484f58; white-space: nowrap;
+      flex-shrink: 0; margin-right: 6px;
+    }
     .report-hero {
       background: linear-gradient(135deg, #1c3a56 0%, #0d2137 60%, #111827 100%);
       border: 1px solid #1f4976; border-radius: 12px;
@@ -579,6 +601,7 @@
 
 <nav class="nav-tabs">
   <button class="nav-tab active" onclick="switchView('stocks')">My Stocks</button>
+  <button class="nav-tab" onclick="switchView('calendar')">My Calendar</button>
   <button class="nav-tab" onclick="switchView('report')">My Report</button>
 </nav>
 
@@ -605,6 +628,10 @@
 <div class="portfolio" id="portfolio"></div>
 
 </div><!-- /view-stocks -->
+
+<div id="view-calendar" style="display:none">
+  <div id="calendar-content" style="max-width:680px;margin:0 auto;padding:12px 0"></div>
+</div><!-- /view-calendar -->
 
 <div id="view-report" style="display:none">
   <div class="report-view">
@@ -642,18 +669,105 @@ let collapsedCats = new Set(JSON.parse(localStorage.getItem('collapsedCats') || 
 let expandedStocks = new Set(JSON.parse(localStorage.getItem('expandedStocks') || '[]'));
 
 function switchView(view, push = true) {
-  document.getElementById('view-stocks').style.display = view === 'stocks' ? '' : 'none';
-  document.getElementById('view-report').style.display  = view === 'report'  ? '' : 'none';
+  document.getElementById('view-stocks').style.display   = view === 'stocks'   ? '' : 'none';
+  document.getElementById('view-calendar').style.display = view === 'calendar' ? '' : 'none';
+  document.getElementById('view-report').style.display   = view === 'report'   ? '' : 'none';
   document.getElementById('add-bar').style.display = view === 'stocks' ? '' : 'none';
   document.querySelectorAll('.nav-tab').forEach((t, i) => {
-    t.classList.toggle('active', (i === 0 && view === 'stocks') || (i === 1 && view === 'report'));
+    t.classList.toggle('active',
+      (i === 0 && view === 'stocks') ||
+      (i === 1 && view === 'calendar') ||
+      (i === 2 && view === 'report'));
   });
+  if (view === 'calendar') renderCalendar();
   if (push) history.pushState({ view }, '', '/' + view);
 }
 
 window.addEventListener('popstate', e => {
   switchView(e.state?.view ?? 'stocks', false);
 });
+
+function renderCalendar() {
+  const el = document.getElementById('calendar-content');
+  if (!el) return;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  // Collect all stocks with a future earnings date
+  const entries = [];
+  for (const s of portfolio.stocks) {
+    const m = metrics[s.ticker];
+    if (!m || m.error || !m.earningsDate) continue;
+    // Parse as local date (not UTC) to avoid timezone shift
+    const [y, mo, dy] = m.earningsDate.split('-').map(Number);
+    const d = new Date(y, mo - 1, dy);
+    if (isNaN(d) || d < today) continue;
+    entries.push({ s, m, d });
+  }
+
+  if (entries.length === 0) {
+    el.innerHTML = '<p class="cal-empty">No upcoming earnings — metrics not loaded yet or none scheduled.</p>';
+    return;
+  }
+
+  // Sort by date
+  entries.sort((a, b) => a.d - b.d);
+
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  const fmt = d => d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+
+  // Build ordered groups: Today, Tomorrow, then monthly
+  const orderedGroups = [];
+  const monthMap = new Map();
+
+  for (const e of entries) {
+    const ts = e.d.getTime();
+    if (ts === today.getTime()) {
+      let g = orderedGroups.find(g => g.key === 'today');
+      if (!g) { g = { key: 'today', label: `Today (${fmt(today)})`, special: true, rows: [] }; orderedGroups.unshift(g); }
+      g.rows.push(e);
+    } else if (ts === tomorrow.getTime()) {
+      let g = orderedGroups.find(g => g.key === 'tomorrow');
+      if (!g) {
+        const idx = orderedGroups.findIndex(g => g.key === 'today');
+        g = { key: 'tomorrow', label: `Tomorrow (${fmt(tomorrow)})`, special: true, rows: [] };
+        orderedGroups.splice(idx + 1, 0, g);
+      }
+      g.rows.push(e);
+    } else {
+      const key = e.d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      if (!monthMap.has(key)) {
+        const g = { key, label: key, special: false, rows: [] };
+        monthMap.set(key, g);
+        orderedGroups.push(g);
+      }
+      monthMap.get(key).rows.push(e);
+    }
+  }
+
+  let html = '';
+  let prevSpecial = false;
+  for (const group of orderedGroups) {
+    const sep = !group.special && prevSpecial ? ' style="margin-top:28px"' : '';
+    html += `<div class="cal-month"${sep}><div class="cal-month-title">${esc(group.label)}</div>`;
+    for (const { s, m, d } of group.rows) {
+      const dateLabel = fmt(d);
+      const sigCls = m.signalNote === 'WAIT EARNINGS' ? 'signal-light-trim' : (m.signalClass || '');
+      const sigTxt = m.signal ? `${m.signal}${m.signalNote ? ` (${esc(m.signalNote)})` : ''}` : '';
+      html += `<div class="cal-row">
+        <span class="cal-date ${m.earningsClass}">${esc(dateLabel)}</span>
+        <span class="cal-name" title="${esc(s.name)}">${esc(s.name)} <span class="cal-ticker">${esc(s.ticker)}</span></span>
+        <span style="flex:1"></span>
+        ${sigTxt ? `<span class="cal-signal ${sigCls}" style="margin-right:12px">${sigTxt}</span>` : ''}
+        <span class="cal-reminder">Schedule a reminder</span>
+        <button class="sq-copy" data-reminder-ticker="${esc(s.ticker)}" data-reminder-name="${esc(s.name)}" data-reminder-date="${esc(m.earningsDate)}" title="Copy scheduling prompt"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+      </div>`;
+    }
+    html += '</div>';
+    prevSpecial = group.special;
+  }
+  el.innerHTML = html;
+}
 function setDirty(val) {
   dirty = val;
   document.getElementById('save-btn')?.classList.toggle('dirty', val);
@@ -755,6 +869,7 @@ async function fetchMetrics() {
     if (cached && Date.now() - cached.ts < METRICS_CACHE_TTL) {
       metrics = cached.data;
       render();
+      renderCalendar();
       return;
     }
     const res = await fetch('/api/metrics');
@@ -762,6 +877,7 @@ async function fetchMetrics() {
     metrics = await res.json();
     localStorage.setItem(METRICS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: metrics }));
     render();
+    renderCalendar();
   } catch (e) { /* silent */ }
 }
 
@@ -866,6 +982,12 @@ function metricsRowHTML(ticker) {
 
 // ---- event delegation for portfolio (called ONCE at init) ----
 function initPortfolioClicks() {
+  // Copy button also works from the calendar view
+  document.getElementById('calendar-content').addEventListener('click', e => {
+    const btn = e.target.closest('[data-reminder-ticker]');
+    if (btn) { copyReminderPrompt(btn); return; }
+  });
+
   const el = document.getElementById('portfolio');
   el.addEventListener('click', e => {
     const delTicker = e.target.closest('[data-del-ticker]');
@@ -930,14 +1052,34 @@ function copyStockData(ticker) {
 
   if (m && !m.error) {
     if (m.signal) lines.push(`Signal: ${m.signal}${m.signalNote ? ` (${m.signalNote})` : ''}`);
-    if (m.earnings) lines.push(`Earnings: ${m.earnings}`);
+    if (m.earnings) lines.push(`Earnings: ${m.earnings.replace(/,\s*$/, '')}`);
   }
 
   if (s?.note) { lines.push(''); lines.push(s.note); }
 
-  const btn = document.querySelector(`[data-copy-ticker="${CSS.escape(ticker)}"]`);
+  const btns = document.querySelectorAll(`[data-copy-ticker="${CSS.escape(ticker)}"]`);
   navigator.clipboard.writeText(lines.join('\n')).then(() => {
-    if (btn) { btn.classList.add('copied'); setTimeout(() => btn.classList.remove('copied'), 100); }
+    btns.forEach(btn => { btn.classList.add('copied'); setTimeout(() => btn.classList.remove('copied'), 100); });
+  }).catch(() => {});
+}
+
+function copyReminderPrompt(btn) {
+  const ticker = btn.dataset.reminderTicker;
+  const name   = btn.dataset.reminderName;
+  const date   = btn.dataset.reminderDate; // ISO 2026-05-07
+  const d = new Date(...date.split('-').map((v, i) => i === 1 ? +v - 1 : +v));
+  const dateLabel = d.toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  const prompt = `I need you to schedule a task related to the earnings release of ${name} (${ticker}).
+
+1. Find the exact time of the ${ticker} earnings release scheduled on ${dateLabel}.
+2. Schedule a task to run exactly 1 minute after that time.
+3. At that moment, fetch the earnings results and determine whether they are positive or negative: check EPS (beat or miss vs. analyst consensus), revenue (beat or miss), and any guidance revision.
+4. Report a concise verdict: BEAT / MISS / IN-LINE, with the key figures.`;
+
+  navigator.clipboard.writeText(prompt).then(() => {
+    btn.classList.add('copied');
+    setTimeout(() => btn.classList.remove('copied'), 100);
   }).catch(() => {});
 }
 
@@ -1795,7 +1937,7 @@ initPortfolioClicks();
 
 loadUser();
 load();
-switchView(location.pathname === '/report' ? 'report' : 'stocks', false);
+switchView(location.pathname === '/report' ? 'report' : location.pathname === '/calendar' ? 'calendar' : 'stocks', false);
 </script>
 </body>
 </html>

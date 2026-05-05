@@ -23,6 +23,7 @@ type StockMetrics struct {
 	EVGPLabel     string  `json:"evgpLabel"`
 	EVGPClass     string  `json:"evgpClass"`
 	Earnings      string  `json:"earnings"`
+	EarningsDate  string  `json:"earningsDate,omitempty"` // ISO 2006-01-02
 	EarningsClass string  `json:"earningsClass"`
 	Signal        string  `json:"signal"`
 	SignalClass   string  `json:"signalClass"`
@@ -182,7 +183,7 @@ func (s *Server) getMetrics(w http.ResponseWriter, r *http.Request) {
 			PEGRatio: f.PEGRatio, PEGLabel: pegLbl, PEGClass: pegCls,
 			PSGRatio: f.PSGRatio, PSGLabel: psgLbl, PSGClass: psgCls,
 			EVGPRatio: f.EVGrossProfit, EVGPLabel: evgpLbl, EVGPClass: evgpCls,
-			Earnings: earningsDisplay, EarningsClass: earningsCls,
+			Earnings: earningsDisplay, EarningsDate: f.NextEarnings, EarningsClass: earningsCls,
 			Signal: f.Signal, SignalClass: signalClass(f.Signal), SignalNote: f.SignalNote,
 			UpdatedAt: updatedAt,
 		}
