@@ -28,9 +28,11 @@ import (
 var staticFiles embed.FS
 
 type Stock struct {
-	Ticker   string `json:"ticker"`
-	Name     string `json:"name"`
-	Category string `json:"category"`
+	Ticker      string `json:"ticker"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Note        string `json:"note,omitempty"`
+	InPortfolio *bool  `json:"inPortfolio,omitempty"`
 }
 
 type Category struct {

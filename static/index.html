@@ -176,6 +176,19 @@
       flex-shrink: 0;
     }
     .btn-del:hover { color: #f85149; background: rgba(248,81,73,0.1); }
+    .sq-inportfolio {
+      position: relative; display: inline-flex; align-items: center;
+      width: 28px; height: 16px; flex-shrink: 0;
+      background: #238636; border: none; border-radius: 999px;
+      cursor: pointer; transition: background 0.2s; padding: 0;
+    }
+    .sq-inportfolio::after {
+      content: ''; position: absolute; left: 2px;
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #fff; transition: left 0.2s;
+    }
+    .sq-inportfolio.watchlist { background: #30363d; }
+    .sq-inportfolio.watchlist::after { left: calc(100% - 14px); }
 
     /* ---- portfolio ---- */
     .portfolio { padding: 0 24px; margin-top: 16px; }
@@ -813,7 +826,8 @@ function stockPriorityHTML(ticker) {
 
 function stockRowHTML(s) {
   const expanded = expandedStocks.has(s.ticker);
-  return `<div class="stock-item">
+  const inPortfolio = s.inPortfolio !== false;
+  return `<div class="stock-item${inPortfolio ? '' : ' watchlist'}">
 <div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
   <button class="sq-toggle${expanded ? ' open' : ''}" data-expand-ticker="${esc(s.ticker)}" draggable="false">${expanded ? '▾' : '▸'}</button>
@@ -822,6 +836,7 @@ function stockRowHTML(s) {
   ${stockPriorityHTML(s.ticker)}
   <button class="sq-copy" data-copy-ticker="${esc(s.ticker)}" draggable="false" title="Copy stock data"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
   <span style="flex:1"></span>
+  <span class="sq-inportfolio-label" style="font-size:10px;color:${inPortfolio ? '#3fb950' : '#8b949e'};margin-right:4px;white-space:nowrap">${inPortfolio ? 'Portfolio' : 'Watchlist'}</span><button class="sq-inportfolio${inPortfolio ? '' : ' watchlist'}" data-portfolio-ticker="${esc(s.ticker)}" draggable="false" title="${inPortfolio ? 'In portfolio' : 'Watchlist only'}"></button>
   <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
 </div>
 <div class="stock-detail${expanded ? ' expanded' : ''}" data-detail-ticker="${esc(s.ticker)}">
@@ -863,6 +878,8 @@ function initPortfolioClicks() {
     if (expandStock) { toggleStockExpand(expandStock.dataset.expandTicker); return; }
     const copyStock = e.target.closest('[data-copy-ticker]');
     if (copyStock) { copyStockData(copyStock.dataset.copyTicker); return; }
+    const portfolioBtn = e.target.closest('[data-portfolio-ticker]');
+    if (portfolioBtn) { togglePortfolio(portfolioBtn.dataset.portfolioTicker); return; }
   });
   el.addEventListener('dblclick', e => {
     const span = e.target.closest('[data-rename-cat]');
@@ -888,6 +905,14 @@ function toggleStockExpand(ticker) {
   const btn    = document.querySelector(`[data-expand-ticker="${CSS.escape(ticker)}"]`);
   if (detail) detail.classList.toggle('expanded', !wasExpanded);
   if (btn) { btn.classList.toggle('open', !wasExpanded); btn.textContent = wasExpanded ? '▸' : '▾'; }
+}
+
+function togglePortfolio(ticker) {
+  const s = portfolio.stocks.find(s => s.ticker === ticker);
+  if (!s) return;
+  s.inPortfolio = s.inPortfolio === false ? true : false;
+  setDirty(true);
+  render();
 }
 
 function copyStockData(ticker) {
@@ -1199,7 +1224,7 @@ function pickStock(ticker, name) {
 // ---- mutations ----
 function addStock(ticker, name, category) {
   if (portfolio.stocks.find(s => s.ticker === ticker)) { toast('err', `${ticker} est déjà dans votre portfolio`); return; }
-  portfolio.stocks.push({ ticker, name, category: category || '' });
+  portfolio.stocks.push({ ticker, name, category: category || '', inPortfolio: true });
   setDirty(true); render(); applyQuotes();
   if (!quotes[ticker]) {
     fetch(`/api/quotes?tickers=${encodeURIComponent(ticker)}`)
