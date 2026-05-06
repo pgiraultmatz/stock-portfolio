@@ -364,7 +364,7 @@
     .stock-ticker:hover { color: #79c0ff; text-decoration: underline; }
     .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
     /* ---- stock detail (expandable) ---- */
-    .stock-detail { display: none; padding: 0 28px 10px 36px; }
+    .stock-detail { display: none; padding: 0 28px 10px 64px; }
     .stock-detail.expanded { display: block; }
     .sq-toggle {
       background: none; border: none; cursor: pointer; padding: 2px 5px;
@@ -380,6 +380,14 @@
     .sq-copy:hover { color: #8b949e; }
     .sq-copy.copied { color: #388bfd; transition: color 0s; }
     .sq-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .sq-conviction {
+      background: transparent; border: none; cursor: pointer; outline: none;
+      font-size: 11px; font-family: inherit; font-weight: 600; letter-spacing: 0.03em;
+      margin-left: 10px; flex-shrink: 0; padding: 1px 0;
+      -webkit-appearance: none; appearance: none;
+    }
+    .sq-conviction option { background: #161b22; color: #c9d1d9; font-weight: 400; }
+    .sq-rate-label { font-size: 11px; color: #484f58; margin-left: 8px; white-space: nowrap; }
     .stock-note-input {
       width: 100%; box-sizing: border-box; margin-top: 6px;
       background: transparent; border: none; border-bottom: 1px dashed #30363d;
@@ -928,6 +936,59 @@ function render() {
   applyQuotes();
 }
 
+const CONVICTION_OPTS = [
+  { value: '',            label: '—',           color: '#484f58' },
+  { value: 'Very High',   label: 'Very High',   color: '#3fb950' },
+  { value: 'High',        label: 'High',        color: '#56d364' },
+  { value: 'Medium-High', label: 'Medium-High', color: '#388bfd' },
+  { value: 'Medium',      label: 'Medium',      color: '#8b949e' },
+  { value: 'Speculative', label: 'Speculative', color: '#f0883e' },
+  { value: 'Low',         label: 'Low',         color: '#f85149' },
+];
+
+function convictionColor(val) {
+  return (CONVICTION_OPTS.find(o => o.value === val) || CONVICTION_OPTS[0]).color;
+}
+
+function resizeConvictionSelect(sel) {
+  const text = sel.options[sel.selectedIndex]?.text || '—';
+  const tmp = document.createElement('span');
+  tmp.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-size:11px;font-weight:600;letter-spacing:0.03em;font-family:inherit';
+  tmp.textContent = text;
+  document.body.appendChild(tmp);
+  sel.style.width = (tmp.offsetWidth + 4) + 'px';
+  document.body.removeChild(tmp);
+}
+
+function convictionHTML(s) {
+  const val = s.conviction || '';
+  const levels = CONVICTION_OPTS.filter(o => o.value).map(o => o.label).join(', ');
+  const opts = CONVICTION_OPTS.map(o =>
+    `<option value="${esc(o.value)}"${o.value === val ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+  const rateHidden = val !== '' ? ' style="display:none"' : '';
+  const rateLabel  = `<span class="sq-rate-label"${rateHidden}>Rate me</span>`;
+  const copyBtn    = `<button class="sq-copy sq-conviction-rate" data-rate-ticker="${esc(s.ticker)}" data-rate-name="${esc(s.name)}" data-rate-levels="${esc(levels)}" draggable="false" title="Copy conviction rating prompt"${rateHidden}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`;
+  return `<span class="sq-rate-label" style="color:#8b949e;margin-left:10px;margin-right:4px">Conviction Level</span><select class="sq-conviction" data-conviction-ticker="${esc(s.ticker)}" style="color:${convictionColor(val)};margin-left:0" draggable="false" title="Conviction">${opts}</select>${rateLabel}${copyBtn}`;
+}
+
+function copyConvictionPrompt(btn) {
+  const ticker = btn.dataset.rateTicker;
+  const name   = btn.dataset.rateName;
+  const levels = btn.dataset.rateLevels;
+  const prompt = `${name} (${ticker}) — please do two things:
+1. Rate the conviction level for this stock from the following options: ${levels}. Choose the one that best fits based on its fundamentals, recent performance, growth prospects, and key risks.
+2. Write 1–2 sentences summarising what this company does, its current momentum, and its strategic angle as an investment.
+
+Format your response as:
+Conviction: [level]
+Summary: [1–2 sentences]`;
+  navigator.clipboard.writeText(prompt).then(() => {
+    btn.classList.add('copied');
+    setTimeout(() => btn.classList.remove('copied'), 100);
+  }).catch(() => {});
+}
+
 function stockPriorityHTML(ticker) {
   const m = metrics[ticker];
   if (!m || m.error) return '';
@@ -949,8 +1010,9 @@ function stockRowHTML(s) {
   <button class="sq-toggle${expanded ? ' open' : ''}" data-expand-ticker="${esc(s.ticker)}" draggable="false">${expanded ? '▾' : '▸'}</button>
   <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a></span>
   <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
+  ${convictionHTML(s)}
   ${stockPriorityHTML(s.ticker)}
-  <button class="sq-copy" data-copy-ticker="${esc(s.ticker)}" draggable="false" title="Copy stock data"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+  <span class="sq-rate-label">Copy line</span><button class="sq-copy" data-copy-ticker="${esc(s.ticker)}" draggable="false" title="Copy stock data"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
   <span style="flex:1"></span>
   <span class="sq-inportfolio-label" style="font-size:10px;color:${inPortfolio ? '#3fb950' : '#8b949e'};margin-right:4px;white-space:nowrap">${inPortfolio ? 'Portfolio' : 'Watchlist'}</span><button class="sq-inportfolio${inPortfolio ? '' : ' watchlist'}" data-portfolio-ticker="${esc(s.ticker)}" draggable="false" title="${inPortfolio ? 'In portfolio' : 'Watchlist only'}"></button>
   <button class="btn-del" data-del-ticker="${esc(s.ticker)}">✕</button>
@@ -1111,6 +1173,25 @@ function bindPortfolioEvents() {
       const s = portfolio.stocks.find(s => s.ticker === ta.dataset.noteTicker);
       if (s) { s.note = ta.value; setDirty(true); }
     });
+  });
+
+  el.querySelectorAll('.sq-conviction[data-conviction-ticker]').forEach(sel => {
+    resizeConvictionSelect(sel);
+    sel.addEventListener('change', () => {
+      const s = portfolio.stocks.find(st => st.ticker === sel.dataset.convictionTicker);
+      if (s) { s.conviction = sel.value; setDirty(true); }
+      sel.style.color = convictionColor(sel.value);
+      resizeConvictionSelect(sel);
+      const rateLabel = sel.nextElementSibling;
+      const rateBtn   = rateLabel?.nextElementSibling;
+      const hide = sel.value !== '' ? 'none' : '';
+      if (rateLabel) rateLabel.style.display = hide;
+      if (rateBtn)   rateBtn.style.display   = hide;
+    });
+  });
+
+  el.querySelectorAll('.sq-conviction-rate[data-rate-ticker]').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); copyConvictionPrompt(btn); });
   });
 
   // Drag start/end on stock rows
@@ -1366,7 +1447,7 @@ function pickStock(ticker, name) {
 // ---- mutations ----
 function addStock(ticker, name, category) {
   if (portfolio.stocks.find(s => s.ticker === ticker)) { toast('err', `${ticker} est déjà dans votre portfolio`); return; }
-  portfolio.stocks.push({ ticker, name, category: category || '', inPortfolio: true });
+  portfolio.stocks.push({ ticker, name, category: category || '', inPortfolio: false });
   setDirty(true); render(); applyQuotes();
   if (!quotes[ticker]) {
     fetch(`/api/quotes?tickers=${encodeURIComponent(ticker)}`)

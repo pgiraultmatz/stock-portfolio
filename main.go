@@ -32,6 +32,7 @@ type Stock struct {
 	Name        string `json:"name"`
 	Category    string `json:"category"`
 	Note        string `json:"note,omitempty"`
+	Conviction  string `json:"conviction,omitempty"`
 	InPortfolio *bool  `json:"inPortfolio,omitempty"`
 }
 
