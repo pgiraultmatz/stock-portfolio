@@ -76,7 +76,7 @@
       display: flex; align-items: center; gap: 12px;
       padding: 8px 0; border-bottom: 1px solid #161b22; font-size: 13px;
     }
-    .cal-date { width: 52px; flex-shrink: 0; font-family: 'SF Mono', monospace; font-size: 12px; }
+    .cal-date { width: 110px; flex-shrink: 0; font-family: 'SF Mono', monospace; font-size: 12px; white-space: nowrap; }
     .cal-name { flex: 1; color: #c9d1d9; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cal-ticker { font-family: 'SF Mono', monospace; font-size: 11px; color: #8b949e; }
     .cal-signal { font-size: 11px; font-family: 'SF Mono', monospace; flex-shrink: 0; font-weight: 700; }
@@ -638,7 +638,7 @@
 </div><!-- /view-stocks -->
 
 <div id="view-calendar" style="display:none">
-  <div id="calendar-content" style="max-width:680px;margin:0 auto;padding:12px 0"></div>
+  <div id="calendar-content" style="max-width:960px;margin:0 auto;padding:12px 0"></div>
 </div><!-- /view-calendar -->
 
 <div id="view-report" style="display:none">
@@ -706,11 +706,18 @@ function renderCalendar() {
   for (const s of portfolio.stocks) {
     const m = metrics[s.ticker];
     if (!m || m.error || !m.earningsDate) continue;
-    // Parse as local date (not UTC) to avoid timezone shift
-    const [y, mo, dy] = m.earningsDate.split('-').map(Number);
-    const d = new Date(y, mo - 1, dy);
+    // Support both RFC3339 ("2026-05-08T21:00:00Z") and legacy "2026-05-08"
+    let dt, d;
+    if (m.earningsDate.includes('T')) {
+      dt = new Date(m.earningsDate);
+      d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    } else {
+      const [y, mo, dy] = m.earningsDate.split('-').map(Number);
+      d = new Date(y, mo - 1, dy);
+      dt = d;
+    }
     if (isNaN(d) || d < today) continue;
-    entries.push({ s, m, d });
+    entries.push({ s, m, d, dt });
   }
 
   if (entries.length === 0) {
@@ -758,12 +765,14 @@ function renderCalendar() {
   for (const group of orderedGroups) {
     const sep = !group.special && prevSpecial ? ' style="margin-top:28px"' : '';
     html += `<div class="cal-month"${sep}><div class="cal-month-title">${esc(group.label)}</div>`;
-    for (const { s, m, d } of group.rows) {
+    for (const { s, m, d, dt } of group.rows) {
       const dateLabel = fmt(d);
+      const hasTime = m.earningsDate.includes('T') && dt.getHours() + dt.getMinutes() > 0;
+      const timeLabel = hasTime ? dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }) : '';
       const sigCls = m.signalNote === 'WAIT EARNINGS' ? 'signal-light-trim' : (m.signalClass || '');
       const sigTxt = m.signal ? `${m.signal}${m.signalNote ? ` (${esc(m.signalNote)})` : ''}` : '';
       html += `<div class="cal-row">
-        <span class="cal-date ${m.earningsClass}">${esc(dateLabel)}</span>
+        <span class="cal-date ${m.earningsClass}">${esc(dateLabel)}${timeLabel ? ` <span style="font-size:10px;color:#8b949e">${timeLabel}</span>` : ''}</span>
         <span class="cal-name" title="${esc(s.name)}">${esc(s.name)} <span class="cal-ticker">${esc(s.ticker)}</span></span>
         <span style="flex:1"></span>
         ${sigTxt ? `<span class="cal-signal ${sigCls}" style="margin-right:12px">${sigTxt}</span>` : ''}
@@ -909,6 +918,14 @@ function render() {
   </div>
 </div>`;
 
+  // Collapse/expand all button
+  if (sorted.length > 0) {
+    const allCollapsed = sorted.every(c => collapsedCats.has(c.name));
+    html += `<div style="margin-bottom:6px">
+  <button id="collapse-all-btn" class="cat-collapse-btn" onclick="toggleAllCategories()" style="font-size:11px;padding:2px 6px">${allCollapsed ? '▶  Expand all' : '▼  Collapse all'}</button>
+</div>`;
+  }
+
   // Category sections
   for (const cat of sorted) {
     const stocks = portfolio.stocks.filter(s => s.category === cat.name);
@@ -1008,7 +1025,7 @@ function stockRowHTML(s) {
 <div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
   <button class="sq-toggle${expanded ? ' open' : ''}" data-expand-ticker="${esc(s.ticker)}" draggable="false">${expanded ? '▾' : '▸'}</button>
-  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker)}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a></span>
+  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker.replace(/-USD$/i, 'USD'))}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a></span>
   <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
   ${convictionHTML(s)}
   ${stockPriorityHTML(s.ticker)}
@@ -1080,6 +1097,20 @@ function toggleCollapseCategory(name) {
   localStorage.setItem('collapsedCats', JSON.stringify([...collapsedCats]));
   render();
 }
+
+function toggleAllCategories() {
+  const cats = portfolio?.categories || [];
+  const allCollapsed = cats.every(c => collapsedCats.has(c.name));
+  if (allCollapsed) {
+    cats.forEach(c => collapsedCats.delete(c.name));
+  } else {
+    cats.forEach(c => collapsedCats.add(c.name));
+  }
+  localStorage.setItem('collapsedCats', JSON.stringify([...collapsedCats]));
+  render();
+}
+
+
 
 function toggleStockExpand(ticker) {
   const wasExpanded = expandedStocks.has(ticker);

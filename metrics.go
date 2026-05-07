@@ -120,15 +120,23 @@ func earningsInfo(isoDate string) (display, class string) {
 	if isoDate == "" {
 		return "", ""
 	}
-	t, err := time.Parse("2006-01-02", isoDate)
+	t, err := time.Parse(time.RFC3339, isoDate)
 	if err != nil {
-		return isoDate, ""
+		t, err = time.Parse("2006-01-02", isoDate)
+		if err != nil {
+			return isoDate, ""
+		}
 	}
+	paris, _ := time.LoadLocation("Europe/Paris")
+	tParis := t.In(paris)
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, now.Location())
+	day := time.Date(tParis.Year(), tParis.Month(), tParis.Day(), 0, 0, 0, 0, now.Location())
 	daysAway := int(day.Sub(today).Hours() / 24)
-	display = t.Format("Jan 2")
+	display = tParis.Format("Jan 2")
+	if tParis.Hour() != 0 {
+		display += tParis.Format(" · 15h04")
+	}
 	switch {
 	case daysAway <= 7:
 		class = "earnings-soon"
