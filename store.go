@@ -894,3 +894,4 @@ func isDynamoConditionalFailed(err error) bool {
 	var ccf *types.ConditionalCheckFailedException
 	return errors.As(err, &ccf)
 }
+

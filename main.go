@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -677,6 +679,159 @@ func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
 }
 
+// ---- Performance (Trade Republic) — filesystem storage ----------------------
+//
+// CSV files  : files/performance/{userID}/tr/tr_{year}.csv
+// Result cache: files/performance/{userID}/tr/result.json
+
+type PerfTRResponse struct {
+	Years   []PerfTRYearRecord `json:"years"`
+	Monthly MonthlyData        `json:"monthly"`
+}
+
+func perfTRDir(userID string) string {
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, userID)
+	return filepath.Join("files", "performance", safe, "tr")
+}
+
+func perfTRCSVPath(userID, year string) string {
+	return filepath.Join(perfTRDir(userID), "tr_"+year+".csv")
+}
+
+func perfTRResultPath(userID string) string {
+	return filepath.Join(perfTRDir(userID), "result.json")
+}
+
+func perfTRListYears(userID string) ([]PerfTRYearRecord, error) {
+	entries, err := os.ReadDir(perfTRDir(userID))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	currentYear := time.Now().Format("2006")
+	var years []PerfTRYearRecord
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "tr_") || !strings.HasSuffix(name, ".csv") || len(name) != 11 {
+			continue
+		}
+		year := name[3:7]
+		years = append(years, PerfTRYearRecord{Year: year, IsCurrent: year == currentYear})
+	}
+	sort.Slice(years, func(i, j int) bool { return years[i].Year < years[j].Year })
+	return years, nil
+}
+
+// computeAndCachePerfTR reads all CSV files, runs FIFO, writes result.json.
+func (s *Server) computeAndCachePerfTR(userID string) (*PerfTRResponse, error) {
+	yearRecords, err := perfTRListYears(userID)
+	if err != nil {
+		return nil, err
+	}
+	var allTxs []TRTransaction
+	for _, yr := range yearRecords {
+		data, err := os.ReadFile(perfTRCSVPath(userID, yr.Year))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", yr.Year, err)
+		}
+		txs, _, err := parseTRCSV(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", yr.Year, err)
+		}
+		allTxs = append(allTxs, txs...)
+	}
+	sort.Slice(allTxs, func(i, j int) bool { return allTxs[i].Date < allTxs[j].Date })
+
+	monthly := calcPerfPnL(allTxs)
+	if monthly == nil {
+		monthly = MonthlyData{}
+	}
+	resp := &PerfTRResponse{Years: yearRecords, Monthly: monthly}
+
+	if data, err := json.Marshal(resp); err == nil {
+		_ = os.WriteFile(perfTRResultPath(userID), data, 0o644)
+	}
+	return resp, nil
+}
+
+// getPerfTR serves result.json (cache); falls back to full computation on miss.
+func (s *Server) getPerfTR(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromCtx(r)
+	if data, err := os.ReadFile(perfTRResultPath(userID)); err == nil {
+		var cached PerfTRResponse
+		if json.Unmarshal(data, &cached) == nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(&cached)
+			return
+		}
+	}
+	resp, err := s.computeAndCachePerfTR(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) postPerfTR(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 5<<20))
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+	txs, year, err := parseTRCSV(string(body))
+	if err != nil {
+		http.Error(w, "invalid CSV: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(txs) == 0 || year == "" {
+		http.Error(w, "no transactions found", http.StatusBadRequest)
+		return
+	}
+	userID := userIDFromCtx(r)
+	if err := os.MkdirAll(perfTRDir(userID), 0o755); err != nil {
+		http.Error(w, "mkdir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(perfTRCSVPath(userID, year), body, 0o644); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	resp, err := s.computeAndCachePerfTR(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) deletePerfTRYear(w http.ResponseWriter, r *http.Request) {
+	year := strings.TrimPrefix(r.URL.Path, "/api/performance/tr/")
+	if len(year) != 4 {
+		http.Error(w, "year required (4 digits)", http.StatusBadRequest)
+		return
+	}
+	userID := userIDFromCtx(r)
+	_ = os.Remove(perfTRCSVPath(userID, year))
+	_ = os.Remove(perfTRResultPath(userID)) // invalidate cache
+	resp, err := s.computeAndCachePerfTR(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 // ---- routing ----
 
 func (s *Server) routes() http.Handler {
@@ -698,7 +853,12 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 	mux.HandleFunc("/account/deleted", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := staticFiles.ReadFile("static/deleted.html")
+		var data []byte
+		if os.Getenv("DEV") == "1" {
+			data, _ = os.ReadFile(filepath.Join("static", "deleted.html"))
+		} else {
+			data, _ = staticFiles.ReadFile("static/deleted.html")
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(data)
 	})
@@ -708,19 +868,38 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/auth/logout", s.authLogout)
 
 	// Protected routes
-	staticFS, _ := fs.Sub(staticFiles, "static")
-	fileServer := http.FileServer(http.FS(staticFS))
+	devMode := os.Getenv("DEV") == "1"
+	var fileServer http.Handler
+	if devMode {
+		log.Println("DEV mode: serving static files from disk (no rebuild needed)")
+		fileServer = http.FileServer(http.Dir("static"))
+	} else {
+		staticFS, _ := fs.Sub(staticFiles, "static")
+		fileServer = http.FileServer(http.FS(staticFS))
+	}
 	protected := http.NewServeMux()
 	protected.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Serve static files that exist; fall back to index.html for SPA routes
 		if r.URL.Path != "/" {
-			if f, err := staticFiles.Open("static" + r.URL.Path); err == nil {
-				f.Close()
+			exists := false
+			if devMode {
+				_, err := os.Stat(filepath.Join("static", r.URL.Path))
+				exists = err == nil
+			} else {
+				f, err := staticFiles.Open("static" + r.URL.Path)
+				if err == nil { f.Close(); exists = true }
+			}
+			if exists {
 				fileServer.ServeHTTP(w, r)
 				return
 			}
 		}
-		data, _ := staticFiles.ReadFile("static/index.html")
+		var data []byte
+		if devMode {
+			data, _ = os.ReadFile(filepath.Join("static", "index.html"))
+		} else {
+			data, _ = staticFiles.ReadFile("static/index.html")
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(data)
 	})
@@ -845,6 +1024,24 @@ func (s *Server) routes() http.Handler {
 			s.getPrompt(w, r)
 		case http.MethodPut:
 			s.putPrompt(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/performance/tr/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.deletePerfTRYear(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	protected.HandleFunc("/api/performance/tr", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getPerfTR(w, r)
+		case http.MethodPost:
+			s.postPerfTR(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

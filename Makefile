@@ -12,6 +12,14 @@ else
 	./$(BINARY) --addr $(ADDR)
 endif
 
+dev: build
+ifeq ($(STORAGE_BACKEND),gist)
+	DEV=1 ./$(BINARY) --addr $(ADDR)
+else
+	$(MAKE) dynamo-up
+	DEV=1 ./$(BINARY) --addr $(ADDR)
+endif
+
 build:
 	go build -o $(BINARY) .
 
