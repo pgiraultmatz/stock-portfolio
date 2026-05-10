@@ -31,6 +31,22 @@ type PerfTRYearRecord struct {
 	IsCurrent bool   `json:"isCurrent"`
 }
 
+// OpenPosition represents a currently-held ETF/stock position derived from FIFO.
+// Price, Value, PnL, PnLPct and Currency are populated at serve time with live quotes.
+type OpenPosition struct {
+	Symbol    string  `json:"symbol"`
+	Name      string  `json:"name"`
+	Shares    float64 `json:"shares"`
+	AvgCost   float64 `json:"avgCost"`
+	TotalCost float64 `json:"totalCost"`
+	Price     float64 `json:"price,omitempty"`
+	Value     float64 `json:"value,omitempty"`
+	PnL       float64 `json:"pnl,omitempty"`
+	PnLPct    float64 `json:"pnlPct,omitempty"`
+	Currency  string  `json:"currency,omitempty"`
+	HasPrice  bool    `json:"hasPrice"`
+}
+
 // ── Parser ────────────────────────────────────────────────────────────────────
 
 var trKeepTypes = map[string]bool{
@@ -175,6 +191,9 @@ func calcPerfPnL(txs []TRTransaction) MonthlyData {
 		case "BUY":
 			if isEtf || isCrypto {
 				totalCost := math.Abs(t.Amount) + math.Abs(t.Fee)
+				if totalCost == 0 && t.Price > 0 { // amount missing in some TR exports
+					totalCost = math.Abs(t.Shares) * t.Price
+				}
 				var uc float64
 				if math.Abs(t.Shares) > 0 {
 					uc = totalCost / math.Abs(t.Shares)
@@ -218,4 +237,86 @@ func calcPerfPnL(txs []TRTransaction) MonthlyData {
 		}
 	}
 	return result
+}
+
+// calcOpenPositions returns currently-held ETF/stock positions (no crypto).
+func calcOpenPositions(txs []TRTransaction) []OpenPosition {
+	etfClasses := map[string]bool{"FUND": true, "STOCK": true}
+
+	type lot struct{ shares, unitCost float64 }
+	fifo  := map[string][]lot{}
+	names := map[string]string{}
+
+	for _, t := range txs {
+		sym := t.Symbol
+		if sym == "" {
+			sym = t.Name
+		}
+		isCrypto := t.AssetClass == "CRYPTO"
+		isEtf := etfClasses[t.AssetClass] ||
+			(!isCrypto && t.AssetClass == "" && (t.Type == "BUY" || t.Type == "SELL"))
+		if !isEtf {
+			continue
+		}
+		if t.Name != "" {
+			names[sym] = t.Name
+		}
+		switch t.Type {
+		case "BUY":
+			totalCost := math.Abs(t.Amount) + math.Abs(t.Fee)
+			if totalCost == 0 && t.Price > 0 { // amount missing in some TR exports
+				totalCost = math.Abs(t.Shares) * t.Price
+			}
+			var uc float64
+			if math.Abs(t.Shares) > 0 {
+				uc = totalCost / math.Abs(t.Shares)
+			}
+			if math.Abs(t.Shares) > 0 {
+				fifo[sym] = append(fifo[sym], lot{math.Abs(t.Shares), uc})
+			}
+		case "SELL":
+			qty := math.Abs(t.Shares)
+			q := fifo[sym]
+			for qty > 1e-9 && len(q) > 0 {
+				take := math.Min(qty, q[0].shares)
+				qty -= take
+				q[0].shares -= take
+				if q[0].shares < 1e-9 {
+					q = q[1:]
+				}
+			}
+			fifo[sym] = q
+		case "STOCKPERK":
+			if t.Shares > 0 {
+				fifo[sym] = append(fifo[sym], lot{t.Shares, 0})
+			}
+		}
+	}
+
+	var positions []OpenPosition
+	for sym, lots := range fifo {
+		var totalShares, totalCost float64
+		for _, l := range lots {
+			totalShares += l.shares
+			totalCost += l.shares * l.unitCost
+		}
+		if totalShares < 1e-9 {
+			continue
+		}
+		avgCost := 0.0
+		if totalShares > 0 {
+			avgCost = totalCost / totalShares
+		}
+		positions = append(positions, OpenPosition{
+			Symbol:    sym,
+			Name:      names[sym],
+			Shares:    totalShares,
+			AvgCost:   avgCost,
+			TotalCost: totalCost,
+		})
+	}
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].TotalCost > positions[j].TotalCost
+	})
+	return positions
 }

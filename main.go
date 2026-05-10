@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -685,8 +686,9 @@ func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 // Result cache: files/performance/{userID}/tr/result.json
 
 type PerfTRResponse struct {
-	Years   []PerfTRYearRecord `json:"years"`
-	Monthly MonthlyData        `json:"monthly"`
+	Years     []PerfTRYearRecord `json:"years"`
+	Monthly   MonthlyData        `json:"monthly"`
+	Positions []OpenPosition     `json:"positions"`
 }
 
 func perfTRDir(userID string) string {
@@ -705,6 +707,39 @@ func perfTRCSVPath(userID, year string) string {
 
 func perfTRResultPath(userID string) string {
 	return filepath.Join(perfTRDir(userID), "result.json")
+}
+
+func perfTRPricesPath(userID string) string {
+	return filepath.Join(perfTRDir(userID), "prices.json")
+}
+
+const pricesCacheTTL = 15 * time.Minute
+
+type pricesCache struct {
+	UpdatedAt time.Time             `json:"updatedAt"`
+	Quotes    map[string]yahooQuote `json:"quotes"`
+}
+
+func loadPricesCache(userID string) *pricesCache {
+	data, err := os.ReadFile(perfTRPricesPath(userID))
+	if err != nil {
+		return nil
+	}
+	var c pricesCache
+	if json.Unmarshal(data, &c) != nil {
+		return nil
+	}
+	if time.Since(c.UpdatedAt) > pricesCacheTTL {
+		return nil
+	}
+	return &c
+}
+
+func savePricesCache(userID string, quotes map[string]yahooQuote) {
+	c := pricesCache{UpdatedAt: time.Now(), Quotes: quotes}
+	if data, err := json.Marshal(c); err == nil {
+		_ = os.WriteFile(perfTRPricesPath(userID), data, 0o644)
+	}
 }
 
 func perfTRListYears(userID string) ([]PerfTRYearRecord, error) {
@@ -753,7 +788,8 @@ func (s *Server) computeAndCachePerfTR(userID string) (*PerfTRResponse, error) {
 	if monthly == nil {
 		monthly = MonthlyData{}
 	}
-	resp := &PerfTRResponse{Years: yearRecords, Monthly: monthly}
+	positions := calcOpenPositions(allTxs)
+	resp := &PerfTRResponse{Years: yearRecords, Monthly: monthly, Positions: positions}
 
 	if data, err := json.Marshal(resp); err == nil {
 		_ = os.WriteFile(perfTRResultPath(userID), data, 0o644)
@@ -761,22 +797,282 @@ func (s *Server) computeAndCachePerfTR(userID string) (*PerfTRResponse, error) {
 	return resp, nil
 }
 
+type yahooQuote struct {
+	Price    float64 `json:"price"`
+	Currency string  `json:"currency"`
+}
+
+var isinRe = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{10}$`)
+
+// openFIGIToYahooSuffix maps OpenFIGI exchange codes to Yahoo Finance ticker suffixes.
+var openFIGIToYahooSuffix = map[string]string{
+	"FH": ".HE", // Helsinki
+	"FP": ".PA", // Paris (Euronext)
+	"GY": ".DE", // XETRA
+	"GF": ".F",  // Frankfurt
+	"NA": ".AS", // Amsterdam
+	"LN": ".L",  // London
+	"SM": ".MC", // Madrid
+	"SW": ".SW", // Zurich
+	"EB": ".BR", // Brussels
+	"IM": ".MI", // Milan
+	"ID": ".IR", // Dublin
+	"SS": ".ST", // Stockholm
+	"DC": ".CO", // Copenhagen
+	"OS": ".OL", // Oslo
+	"AU": ".AX", // ASX (Australia)
+}
+
+// resolveISINs batch-resolves ISINs to Yahoo tickers via OpenFIGI.
+// Returns a map ISIN → Yahoo ticker for successfully resolved symbols.
+func resolveISINs(ctx context.Context, isins []string) map[string]string {
+	if len(isins) == 0 {
+		return nil
+	}
+
+	type figiReq struct {
+		IDType   string `json:"idType"`
+		IDValue  string `json:"idValue"`
+		ExchCode string `json:"exchCode,omitempty"`
+	}
+	type figiMatch struct {
+		Ticker   string `json:"ticker"`
+		ExchCode string `json:"exchCode"`
+	}
+	type figiResp struct {
+		Data  []figiMatch `json:"data"`
+		Error string      `json:"error"`
+	}
+
+	reqs := make([]figiReq, len(isins))
+	for i, isin := range isins {
+		reqs[i] = figiReq{IDType: "ID_ISIN", IDValue: isin}
+		if strings.HasPrefix(isin, "US") {
+			reqs[i].ExchCode = "US"
+		}
+	}
+
+	figiToYahoo := func(ticker, exchCode string) string {
+		if suffix, ok := openFIGIToYahooSuffix[exchCode]; ok {
+			return ticker + suffix
+		}
+		return ticker // US or unknown → use ticker as-is
+	}
+
+	const batchSize = 10
+	mapping := make(map[string]string, len(isins))
+	for start := 0; start < len(reqs); start += batchSize {
+		end := start + batchSize
+		if end > len(reqs) {
+			end = len(reqs)
+		}
+		body, _ := json.Marshal(reqs[start:end])
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openfigi.com/v3/mapping", strings.NewReader(string(body)))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+		var results []figiResp
+		if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+		for i, r := range results {
+			if r.Error == "" && len(r.Data) > 0 {
+				m := r.Data[0]
+				mapping[isins[start+i]] = figiToYahoo(m.Ticker, m.ExchCode)
+			}
+		}
+	}
+	return mapping
+}
+
+func fetchYahooPrice(ctx context.Context, ticker string) (yahooQuote, bool) {
+	type chartMeta struct {
+		RegularMarketPrice float64 `json:"regularMarketPrice"`
+		Currency           string  `json:"currency"`
+	}
+	type chartResp struct {
+		Chart struct {
+			Result []struct{ Meta chartMeta `json:"meta"` } `json:"result"`
+			Error  *struct{ Code string }                   `json:"error"`
+		} `json:"chart"`
+	}
+	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(ticker) + "?range=1d&interval=1d"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return yahooQuote{}, false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return yahooQuote{}, false
+	}
+	defer resp.Body.Close()
+	var cr chartResp
+	if json.NewDecoder(resp.Body).Decode(&cr) != nil {
+		return yahooQuote{}, false
+	}
+	if cr.Chart.Error != nil || len(cr.Chart.Result) == 0 {
+		return yahooQuote{}, false
+	}
+	price := cr.Chart.Result[0].Meta.RegularMarketPrice
+	if price == 0 {
+		return yahooQuote{}, false
+	}
+	return yahooQuote{Price: price, Currency: cr.Chart.Result[0].Meta.Currency}, true
+}
+
+// fetchYahooPrices resolves ISINs via OpenFIGI, then fetches prices from Yahoo.
+// Returns results keyed by the original symbol (ISIN or ticker).
+func fetchYahooPrices(ctx context.Context, symbols []string) map[string]yahooQuote {
+	// Step 1: batch-resolve ISINs → tickers via OpenFIGI.
+	var isins []string
+	for _, sym := range symbols {
+		if isinRe.MatchString(sym) {
+			isins = append(isins, sym)
+		}
+	}
+	isinMap := resolveISINs(ctx, isins) // ISIN → ticker
+
+	tickers := make(map[string]string, len(symbols))
+	for _, sym := range symbols {
+		if t, ok := isinMap[sym]; ok {
+			tickers[sym] = t
+		} else {
+			tickers[sym] = sym
+		}
+	}
+
+	// Step 2: fetch prices for all unique tickers concurrently.
+	unique := map[string]struct{}{}
+	for _, t := range tickers {
+		unique[t] = struct{}{}
+	}
+	prices := make(map[string]yahooQuote, len(unique))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for t := range unique {
+		t := t
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if q, ok := fetchYahooPrice(ctx, t); ok {
+				mu.Lock()
+				prices[t] = q
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Step 3: map results back to original symbols.
+	results := make(map[string]yahooQuote, len(symbols))
+	for sym, ticker := range tickers {
+		if q, ok := prices[ticker]; ok {
+			results[sym] = q
+		}
+	}
+	return results
+}
+
 // getPerfTR serves result.json (cache); falls back to full computation on miss.
+// Positions are enriched with live Yahoo prices on every request.
 func (s *Server) getPerfTR(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromCtx(r)
+	var resp *PerfTRResponse
 	if data, err := os.ReadFile(perfTRResultPath(userID)); err == nil {
 		var cached PerfTRResponse
-		if json.Unmarshal(data, &cached) == nil {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(&cached)
+		if json.Unmarshal(data, &cached) == nil && cached.Positions != nil {
+			resp = &cached
+		}
+	}
+	if resp == nil {
+		var err error
+		resp, err = s.computeAndCachePerfTR(userID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
-	resp, err := s.computeAndCachePerfTR(userID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+
+	// Enrich positions with prices (cached or fresh from Yahoo).
+	if len(resp.Positions) > 0 {
+		syms := make([]string, len(resp.Positions))
+		for i, p := range resp.Positions {
+			syms[i] = p.Symbol
+		}
+		var quotes map[string]yahooQuote
+		if c := loadPricesCache(userID); c != nil && len(c.Quotes) > 0 {
+			quotes = c.Quotes
+		} else {
+			fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			quotes = fetchYahooPrices(fetchCtx, syms)
+			if len(quotes) > 0 {
+				savePricesCache(userID, quotes)
+			}
+		}
+
+		// Collect all non-EUR currencies that need conversion.
+		nonEURCurrencies := map[string]struct{}{}
+		for _, p := range resp.Positions {
+			if q, ok := quotes[p.Symbol]; ok && q.Currency != "" && q.Currency != "EUR" {
+				nonEURCurrencies[q.Currency] = struct{}{}
+			}
+		}
+		// Fetch EUR/{CUR}=X rates concurrently (e.g. EURUSD=X gives USD per 1 EUR).
+		fxRates := map[string]float64{} // currency → EUR{CUR}=X rate
+		if len(nonEURCurrencies) > 0 {
+			fxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var fxMu sync.Mutex
+			var fxWg sync.WaitGroup
+			for cur := range nonEURCurrencies {
+				cur := cur
+				fxWg.Add(1)
+				go func() {
+					defer fxWg.Done()
+					if q, ok := fetchYahooPrice(fxCtx, "EUR"+cur+"=X"); ok {
+						fxMu.Lock()
+						fxRates[cur] = q.Price
+						fxMu.Unlock()
+					}
+				}()
+			}
+			fxWg.Wait()
+		}
+
+		for i, p := range resp.Positions {
+			q, ok := quotes[p.Symbol]
+			if !ok {
+				continue
+			}
+			// priceEUR = price / (EUR/CUR rate); for EUR-denominated prices rate is 1.
+			priceEUR := q.Price
+			if q.Currency != "EUR" {
+				if rate, ok := fxRates[q.Currency]; ok && rate > 0 {
+					priceEUR = q.Price / rate
+				}
+			}
+			resp.Positions[i].Price = q.Price
+			resp.Positions[i].Value = priceEUR * p.Shares
+			resp.Positions[i].PnL = resp.Positions[i].Value - p.TotalCost
+			resp.Positions[i].PnLPct = resp.Positions[i].PnL / p.TotalCost * 100
+			resp.Positions[i].Currency = q.Currency
+			resp.Positions[i].HasPrice = true
+		}
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }

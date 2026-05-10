@@ -171,6 +171,8 @@
     .perf-staged-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
     .perf-empty { text-align: center; padding: 64px 24px; color: #484f58; }
     .perf-empty-icon { font-size: 40px; margin-bottom: 16px; }
+    .perf-spinner { width: 36px; height: 36px; border: 3px solid #21262d; border-top-color: #388bfd; border-radius: 50%; animation: perf-spin .7s linear infinite; margin: 0 auto 20px; }
+    @keyframes perf-spin { to { transform: rotate(360deg); } }
     .perf-empty-title { font-size: 15px; font-weight: 600; color: #8b949e; margin-bottom: 8px; }
     .perf-empty-desc { font-size: 13px; line-height: 1.6; }
     .perf-year-section { margin-bottom: 28px; }
@@ -191,6 +193,27 @@
     .perf-sep-row > td { height: 8px; }
     .perf-total-row > td { border-top: 2px solid #30363d; font-weight: 700; }
     .perf-total-row .perf-rl { color: #e6edf3; }
+    .perf-portfolio { display: flex; gap: 32px; align-items: flex-start; margin-bottom: 36px; }
+    .perf-pos-table-wrap { flex: 1; min-width: 0; overflow-x: auto; }
+    .perf-pos-table { width: 100%; border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
+    .perf-pos-table th { font-size: 10px; font-weight: 700; color: #484f58; text-transform: uppercase; letter-spacing: .06em; padding: 6px 10px; border-bottom: 1px solid #21262d; }
+    .perf-pos-table th:not(:first-child) { text-align: right; }
+    .perf-pos-table td { padding: 7px 10px; border-bottom: 1px solid #161b22; }
+    .perf-pos-table td:not(:first-child) { text-align: right; font-family: 'SF Mono', monospace; font-size: 11.5px; }
+    .perf-pos-table tr:hover td { background: #161b22; }
+    .perf-totals { display: flex; flex-direction: column; gap: 6px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+    .perf-totals-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .perf-totals-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; }
+    .perf-totals-val { font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 700; }
+    .perf-pos-sym { font-weight: 700; color: #e6edf3; font-size: 12px; }
+    .perf-pos-name { font-size: 11px; color: #484f58; margin-top: 1px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+    .perf-pos-no-price { color: #484f58; font-style: italic; }
+    .perf-pie-wrap { flex-shrink: 0; width: 220px; }
+    .perf-pie-legend { margin-top: 14px; display: flex; flex-direction: column; gap: 5px; }
+    .perf-pie-legend-item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #8b949e; }
+    .perf-pie-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .perf-pie-legend-pct { margin-left: auto; font-family: 'SF Mono', monospace; color: #c9d1d9; }
+    .perf-section-title { font-size: 13px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #21262d; }
 
     /* ---- add bar ---- */
     .add-bar {
@@ -244,6 +267,8 @@
     .btn-export.dirty { background: #1f6feb; color: #fff; }
     .btn-primary { background: #238636; color: #fff; }
     .btn-ghost   { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+    .btn-copied  { background: #1a3d1a !important; color: #3fb950 !important; border-color: #238636 !important; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
     .btn-del {
       background: none; border: none; color: #484f58; cursor: pointer;
       font-size: 14px; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
@@ -710,7 +735,7 @@
         <span id="perf-tr-drop-label">Select Trade Republic CSV files</span>
         <span style="color:#8b949e;font-size:12px;margin-left:8px">(.csv)</span>
       </div>
-      <button id="perf-tr-import-btn" class="btn btn-primary" disabled onclick="trImportStaged()">Import</button>
+      <button id="perf-tr-import-btn" class="btn btn-ghost" disabled onclick="trImportStaged()">Import</button>
     </div>
     <div id="perf-tr-staged"></div>
     <div id="perf-tr-content"></div>
@@ -2216,6 +2241,7 @@ function renderStagedFiles() {
 
   if (stagedFiles.length === 0) {
     btn.disabled = true;
+    btn.className = 'btn btn-ghost';
     btn.textContent = 'Import';
     label.textContent = 'Select Trade Republic CSV files';
     el.innerHTML = '';
@@ -2223,7 +2249,8 @@ function renderStagedFiles() {
   }
 
   btn.disabled = false;
-  btn.textContent = `Import (${stagedFiles.length})`;
+  btn.className = 'btn btn-primary';
+  btn.textContent = 'Import';
   label.textContent = stagedFiles.map(f => f.name).join(', ');
 
   el.innerHTML = stagedFiles.map((f, i) =>
@@ -2298,16 +2325,180 @@ function fmtE(n) {
   return `<span class="${n>=0?'perf-mc-pos':'perf-mc-neg'}">${n>=0?'+':'−'}${s}</span>`;
 }
 
+// ─── Pie chart ────────────────────────────────────────────────────────────────
+
+const PIE_COLORS = [
+  '#388bfd','#3fb950','#d29922','#f85149','#8957e5',
+  '#39c5cf','#e3b341','#db61a2','#6e7681','#58a6ff',
+];
+
+function renderPieChart(slices) {
+  // slices: [{label, value, color}]
+  const total = slices.reduce((s, x) => s + x.value, 0);
+  if (total <= 0) return '';
+  const cx = 90, cy = 90, r = 80;
+  let angle = -Math.PI / 2;
+  let paths = '';
+  for (const sl of slices) {
+    const sweep = (sl.value / total) * 2 * Math.PI;
+    if (sweep < 0.001) continue;
+    const x1 = cx + r * Math.cos(angle);
+    const y1 = cy + r * Math.sin(angle);
+    angle += sweep;
+    const x2 = cx + r * Math.cos(angle);
+    const y2 = cy + r * Math.sin(angle);
+    const large = sweep > Math.PI ? 1 : 0;
+    paths += `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large},1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${sl.color}" stroke="#0d1117" stroke-width="1.5"/>`;
+  }
+  return `<svg width="180" height="180" viewBox="0 0 180 180">${paths}</svg>`;
+}
+
+function isISIN(s) {
+  return /^[A-Z]{2}[A-Z0-9]{10}$/.test(s);
+}
+
+function copyPortfolioForAI(btn) {
+  const positions = (perfTrData && perfTrData.positions) || [];
+  if (!positions.length) return;
+
+  const totalValue = positions.reduce((s, p) => s + (p.hasPrice ? p.value : p.totalCost), 0);
+  const fmt2 = n => n.toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  const lines = [
+    'Voici mon portefeuille boursier actuel. Analyse chaque ligne et dis-moi pour chacune si tu recommandes de vendre, renforcer, couper la position, ou la conserver, et pourquoi. Indique aussi les positions qui te semblent dangereuses ou sous-performantes.',
+    '',
+    `Valeur totale du portefeuille : €${fmt2(totalValue)}`,
+    '',
+    'Position | Shares | Avg Cost (€) | Current Price | Value (€) | P&L (€) | P&L %',
+    '---------|--------|--------------|---------------|-----------|---------|-------',
+  ];
+
+  for (const p of positions) {
+    const name = (isISIN(p.symbol) && p.name) ? p.name : p.symbol;
+    const price = p.hasPrice ? `${fmt2(p.price)} ${p.currency}` : 'N/A';
+    const value = p.hasPrice ? `€${fmt2(p.value)}` : `€${fmt2(p.totalCost)} (coût)`;
+    const pnl   = p.hasPrice ? `€${fmt2(p.pnl)}` : 'N/A';
+    const pct   = p.hasPrice ? `${p.pnlPct >= 0 ? '+' : ''}${fmt2(p.pnlPct)}%` : 'N/A';
+    lines.push(`${name} | ${fmt2(p.shares)} | €${fmt2(p.avgCost)} | ${price} | ${value} | ${pnl} | ${pct}`);
+  }
+
+  const ICON_COPY = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  const ICON_CHECK = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`;
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    if (!btn) return;
+    btn.innerHTML = ICON_CHECK + ' Copied!';
+    btn.classList.add('btn-copied');
+    setTimeout(() => {
+      btn.innerHTML = ICON_COPY + ' Analyze Portfolio with AI';
+      btn.classList.remove('btn-copied');
+    }, 2000);
+  });
+}
+
+function renderPortfolioSection(positions) {
+  if (!positions || positions.length === 0) return '';
+
+  const totalValue = positions.reduce((s, p) => s + (p.hasPrice ? p.value : p.totalCost), 0);
+
+  const slices = positions.slice(0, 10).map((p, i) => ({
+    label: isISIN(p.symbol) && p.name ? p.name : p.symbol,
+    value: p.hasPrice ? p.value : p.totalCost,
+    color: PIE_COLORS[i % PIE_COLORS.length],
+  }));
+
+  const legendHtml = slices.map(sl => {
+    const pct = totalValue > 0 ? (sl.value / totalValue * 100).toFixed(1) : '0.0';
+    return `<div class="perf-pie-legend-item">
+      <span class="perf-pie-legend-dot" style="background:${sl.color}"></span>
+      <span>${sl.label}</span>
+      <span class="perf-pie-legend-pct">${pct}%</span>
+    </div>`;
+  }).join('');
+
+  const fmtCur = (n, cur) => {
+    const s = Math.abs(n).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const sym = cur === 'USD' ? '$' : cur === 'GBP' ? '£' : '€';
+    return sym + s;
+  };
+
+  const pricedPositions = positions.filter(p => p.hasPrice);
+  const totalPnL   = pricedPositions.reduce((s, p) => s + p.pnl, 0);
+  const totalCost  = pricedPositions.reduce((s, p) => s + p.totalCost, 0);
+  const totalPnLPct = totalCost > 0 ? totalPnL / totalCost * 100 : 0;
+
+  const rowsHtml = positions.map((p, i) => {
+    const color = PIE_COLORS[i % PIE_COLORS.length];
+    const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;flex-shrink:0"></span>`;
+    // Cost is always EUR (TR account); value/P&L are EUR (converted server-side).
+    // Price stays in native currency (USD for US stocks).
+    const priceFmt = p.hasPrice ? fmtCur(p.price, p.currency) : '<span class="perf-pos-no-price">—</span>';
+    const valueFmt = p.hasPrice ? fmtCur(p.value, 'EUR') : `<span class="perf-pos-no-price">No price</span>`;
+    const pnlHtml  = p.hasPrice
+      ? `<span class="${p.pnl >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${p.pnl >= 0 ? '+' : '−'}${fmtCur(p.pnl, 'EUR')}</span>`
+      : `<span class="perf-pos-no-price">—</span>`;
+    const pnlPctHtml = p.hasPrice
+      ? `<span class="${p.pnlPct >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${p.pnlPct >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%</span>`
+      : `<span class="perf-pos-no-price">—</span>`;
+    return `<tr>
+      <td><div style="display:flex;align-items:center">${dot}<div><div class="perf-pos-sym">${isISIN(p.symbol) && p.name ? p.name : p.symbol}</div><div class="perf-pos-name">${isISIN(p.symbol) && p.name ? p.symbol : (p.name || '')}</div></div></div></td>
+      <td>${p.shares.toLocaleString('fr-FR', {maximumFractionDigits:6})}</td>
+      <td>${fmtCur(p.avgCost, 'EUR')}</td>
+      <td>${priceFmt}</td>
+      <td>${valueFmt}</td>
+      <td>${pnlHtml}</td>
+      <td>${pnlPctHtml}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #21262d">
+      <span class="perf-section-title" style="margin:0;padding:0;border:none">Current Portfolio</span>
+      <button class="btn btn-ghost" style="font-size:12px;padding:5px 12px;display:flex;align-items:center;gap:6px" onclick="copyPortfolioForAI(this)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        Analyze Portfolio with AI
+      </button>
+    </div>
+    <div class="perf-portfolio">
+      <div class="perf-pos-table-wrap">
+        <table class="perf-pos-table">
+          <thead><tr>
+            <th>Asset</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&amp;L</th><th>P&amp;L %</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      <div class="perf-pie-wrap">
+        <div class="perf-totals">
+          <div class="perf-totals-row">
+            <span class="perf-totals-label">Valeur</span>
+            <span class="perf-totals-val">${fmtCur(totalValue, 'EUR')}</span>
+          </div>
+          <div class="perf-totals-row">
+            <span class="perf-totals-label">P&amp;L</span>
+            <span class="perf-totals-val ${totalPnL >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${totalPnL >= 0 ? '+' : '−'}${fmtCur(totalPnL, 'EUR')}</span>
+          </div>
+          <div class="perf-totals-row">
+            <span class="perf-totals-label">P&amp;L %</span>
+            <span class="perf-totals-val ${totalPnLPct >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${totalPnLPct >= 0 ? '+' : ''}${totalPnLPct.toFixed(2)}%</span>
+          </div>
+        </div>
+        ${renderPieChart(slices)}
+        <div class="perf-pie-legend">${legendHtml}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderTrTab() {
   const el = document.getElementById('perf-tr-content');
   if (!el) return;
 
   if (perfTrData === null) {
-    el.innerHTML = '<div class="perf-empty"><div class="perf-empty-icon">⏳</div><div class="perf-empty-title">Loading…</div></div>';
+    el.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Loading…</div></div>';
     return;
   }
 
-  const years = (perfTrData.years || []).map(y => y.year).sort();
+  const years = (perfTrData.years || []).map(y => y.year).sort().reverse();
   if (!years.length) {
     el.innerHTML = `<div class="perf-empty">
       <div class="perf-empty-icon">📊</div>
@@ -2317,8 +2508,10 @@ function renderTrTab() {
     return;
   }
 
+  const portfolioHtml = renderPortfolioSection(perfTrData.positions || []);
   const monthly = perfTrData.monthly || {};
-  el.innerHTML = years.map(year => {
+  const divider = portfolioHtml ? '<div class="perf-section-title" style="margin-top:36px">P&amp;L History</div>' : '';
+  el.innerHTML = portfolioHtml + divider + years.map(year => {
     const yObj = (perfTrData.years || []).find(y => y.year === year) || {};
     const months = [];
     for (let m = 1; m <= 12; m++) {
