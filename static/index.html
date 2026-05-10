@@ -205,6 +205,13 @@
     .perf-totals-row { display: flex; justify-content: space-between; align-items: baseline; }
     .perf-totals-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; }
     .perf-totals-val { font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 700; }
+    .perf-ai-rec-wrap { margin-top: 20px; }
+    .perf-ai-rec-label { display: block; font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .perf-ai-rec-view { min-height: 80px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; color: #c9d1d9; font-size: 13px; line-height: 1.7; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; cursor: text; transition: border-color .15s; }
+    .perf-ai-rec-view:hover { border-color: #30363d; }
+    .perf-ai-rec-view.empty { color: #484f58; font-style: italic; }
+    .perf-ai-rec { width: 100%; box-sizing: border-box; min-height: 400px; background: #161b22; border: 1px solid #388bfd; border-radius: 8px; color: #c9d1d9; font-size: 13px; line-height: 1.7; padding: 12px 14px; resize: vertical; font-family: inherit; outline: none; }
+    .perf-ai-rec::placeholder { color: #484f58; }
     .perf-pos-sym { font-weight: 700; color: #e6edf3; font-size: 12px; }
     .perf-pos-name { font-size: 11px; color: #484f58; margin-top: 1px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
     .perf-pos-no-price { color: #484f58; font-style: italic; }
@@ -2192,6 +2199,13 @@ async function loadPerfData() {
   } catch(e) {
     perfTrData = { years: [], monthly: {} };
   }
+  try {
+    const recResp = await fetch('/api/performance/tr/ai-rec');
+    if (recResp.ok) {
+      const recData = await recResp.json();
+      if (perfTrData) perfTrData.aiRec = recData.content || '';
+    }
+  } catch(e) { /* ignore */ }
   if (document.getElementById('view-performance').style.display !== 'none') renderTrTab();
 }
 
@@ -2486,7 +2500,49 @@ function renderPortfolioSection(positions) {
         <div class="perf-pie-legend">${legendHtml}</div>
       </div>
     </div>
+    <div class="perf-ai-rec-wrap">
+      <label class="perf-ai-rec-label">AI Recommendation</label>
+      <div id="perf-ai-rec-view" class="perf-ai-rec-view${perfTrData && perfTrData.aiRec ? '' : ' empty'}" onclick="aiRecStartEdit()">${perfTrData && perfTrData.aiRec ? escapeHtml(perfTrData.aiRec) : 'Click to add an AI recommendation…'}</div>
+      <textarea id="perf-ai-rec" class="perf-ai-rec" placeholder="Paste the AI analysis here…" style="display:none" oninput="saveAIRec(this.value)" onblur="aiRecStopEdit()">${perfTrData && perfTrData.aiRec ? perfTrData.aiRec : ''}</textarea>
+    </div>
   </div>`;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function aiRecStartEdit() {
+  const view = document.getElementById('perf-ai-rec-view');
+  const ta   = document.getElementById('perf-ai-rec');
+  if (!view || !ta) return;
+  view.style.display = 'none';
+  ta.style.display   = 'block';
+  ta.focus();
+}
+
+function aiRecStopEdit() {
+  const view = document.getElementById('perf-ai-rec-view');
+  const ta   = document.getElementById('perf-ai-rec');
+  if (!view || !ta) return;
+  const val = ta.value;
+  view.className = 'perf-ai-rec-view' + (val ? '' : ' empty');
+  view.innerHTML  = val ? escapeHtml(val) : 'Click to add an AI recommendation…';
+  ta.style.display   = 'none';
+  view.style.display = 'block';
+}
+
+let aiRecDebounce = null;
+function saveAIRec(value) {
+  if (perfTrData) perfTrData.aiRec = value;
+  clearTimeout(aiRecDebounce);
+  aiRecDebounce = setTimeout(() => {
+    fetch('/api/performance/tr/ai-rec', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: value }),
+    });
+  }, 800);
 }
 
 function renderTrTab() {

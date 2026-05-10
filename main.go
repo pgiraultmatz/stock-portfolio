@@ -713,6 +713,31 @@ func perfTRPricesPath(userID string) string {
 	return filepath.Join(perfTRDir(userID), "prices.json")
 }
 
+func (s *Server) getAIRec(w http.ResponseWriter, r *http.Request) {
+	content, err := s.store.GetTRAIRec(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"content": content})
+}
+
+func (s *Server) putAIRec(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.PutTRAIRec(r.Context(), userIDFromCtx(r), body.Content); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 const pricesCacheTTL = 15 * time.Minute
 
 type pricesCache struct {
@@ -1325,6 +1350,16 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 
+	protected.HandleFunc("/api/performance/tr/ai-rec", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getAIRec(w, r)
+		case http.MethodPut:
+			s.putAIRec(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	protected.HandleFunc("/api/performance/tr/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			s.deletePerfTRYear(w, r)

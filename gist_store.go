@@ -46,6 +46,7 @@ type GistStore struct {
 	categories    []Category
 	xGroups       []XGroup
 	promptContent string
+	trAIRec       string
 	stockData     *StockDataFile
 }
 
@@ -123,6 +124,9 @@ func (s *GistStore) load() error {
 	}
 	if p, ok := gist.Files["prompt.txt"]; ok {
 		s.promptContent = p.Content
+	}
+	if r, ok := gist.Files["tr_ai_rec.txt"]; ok {
+		s.trAIRec = r.Content
 	}
 	if d, ok := gist.Files["stock-data.json"]; ok {
 		var sd StockDataFile
@@ -324,6 +328,33 @@ func (s *GistStore) PutPrompt(_ context.Context, _ string, content string) error
 	payload, _ := json.Marshal(map[string]any{
 		"files": map[string]any{
 			"prompt.txt": map[string]any{"content": content},
+		},
+	})
+	resp, err := s.gistRequest(http.MethodPatch, string(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github API returned %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+func (s *GistStore) GetTRAIRec(_ context.Context, _ string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.trAIRec, nil
+}
+
+func (s *GistStore) PutTRAIRec(_ context.Context, _ string, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trAIRec = content
+	payload, _ := json.Marshal(map[string]any{
+		"files": map[string]any{
+			"tr_ai_rec.txt": map[string]any{"content": content},
 		},
 	})
 	resp, err := s.gistRequest(http.MethodPatch, string(payload))
