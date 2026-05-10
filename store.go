@@ -59,6 +59,8 @@ type Store interface {
 	PutPrompt(ctx context.Context, userID string, content string) error
 	GetTRAIRec(ctx context.Context, userID string) (string, error)
 	PutTRAIRec(ctx context.Context, userID string, content string) error
+	GetYuhAIRec(ctx context.Context, userID string) (string, error)
+	PutYuhAIRec(ctx context.Context, userID string, content string) error
 	GetNitterInstances(ctx context.Context, userID string) []string
 	PutStock(ctx context.Context, userID string, s Stock) error
 	DeleteStock(ctx context.Context, userID, ticker string) error
@@ -673,6 +675,41 @@ func (d *DynamoStore) GetTRAIRec(ctx context.Context, userID string) (string, er
 func (d *DynamoStore) PutTRAIRec(ctx context.Context, userID string, content string) error {
 	item, err := attributevalue.MarshalMap(map[string]any{
 		"PK": "USER#" + userID, "SK": "TR_AI_REC",
+		"Content": content,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = d.client.PutItem(ctx, &dynamodb.PutItemInput{TableName: &d.table, Item: item})
+	return err
+}
+
+func (d *DynamoStore) GetYuhAIRec(ctx context.Context, userID string) (string, error) {
+	result, err := d.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: &d.table,
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: "USER#" + userID},
+			"SK": &types.AttributeValueMemberS{Value: "YUH_AI_REC"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if result.Item == nil {
+		return "", nil
+	}
+	var row struct {
+		Content string `dynamodbav:"Content"`
+	}
+	if err := attributevalue.UnmarshalMap(result.Item, &row); err != nil {
+		return "", err
+	}
+	return row.Content, nil
+}
+
+func (d *DynamoStore) PutYuhAIRec(ctx context.Context, userID string, content string) error {
+	item, err := attributevalue.MarshalMap(map[string]any{
+		"PK": "USER#" + userID, "SK": "YUH_AI_REC",
 		"Content": content,
 	})
 	if err != nil {

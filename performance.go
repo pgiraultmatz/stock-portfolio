@@ -34,17 +34,18 @@ type PerfTRYearRecord struct {
 // OpenPosition represents a currently-held ETF/stock position derived from FIFO.
 // Price, Value, PnL, PnLPct and Currency are populated at serve time with live quotes.
 type OpenPosition struct {
-	Symbol    string  `json:"symbol"`
-	Name      string  `json:"name"`
-	Shares    float64 `json:"shares"`
-	AvgCost   float64 `json:"avgCost"`
-	TotalCost float64 `json:"totalCost"`
-	Price     float64 `json:"price,omitempty"`
-	Value     float64 `json:"value,omitempty"`
-	PnL       float64 `json:"pnl,omitempty"`
-	PnLPct    float64 `json:"pnlPct,omitempty"`
-	Currency  string  `json:"currency,omitempty"`
-	HasPrice  bool    `json:"hasPrice"`
+	Symbol       string  `json:"symbol"`
+	Name         string  `json:"name"`
+	Shares       float64 `json:"shares"`
+	AvgCost      float64 `json:"avgCost"`
+	TotalCost    float64 `json:"totalCost"`
+	CostCurrency string  `json:"costCurrency,omitempty"` // "" or "EUR" for TR; native currency for Yuh
+	Price        float64 `json:"price,omitempty"`
+	Value        float64 `json:"value,omitempty"`
+	PnL          float64 `json:"pnl,omitempty"`
+	PnLPct       float64 `json:"pnlPct,omitempty"`
+	Currency     string  `json:"currency,omitempty"`
+	HasPrice     bool    `json:"hasPrice"`
 }
 
 // ── Parser ────────────────────────────────────────────────────────────────────
@@ -319,4 +320,266 @@ func calcOpenPositions(txs []TRTransaction) []OpenPosition {
 		return positions[i].TotalCost > positions[j].TotalCost
 	})
 	return positions
+}
+
+// ── Yuh ───────────────────────────────────────────────────────────────────────
+
+type YuhTransaction struct {
+	Date           string
+	ActivityType   string
+	Name           string
+	Debit          float64
+	DebitCurrency  string
+	Credit         float64
+	CreditCurrency string
+	Fee            float64
+	Side           string // "BUY" or "SELL"
+	Quantity       float64
+	Asset          string
+	PricePerUnit   float64
+}
+
+// yuhBloombergToYahoo converts Bloomberg-style exchange codes embedded in Yuh
+// asset tickers (e.g. "CHDVD SW Equity") to Yahoo Finance format ("CHDVD.SW").
+var yuhBloombergSuffix = map[string]string{
+	"SW": ".SW", // SIX Swiss Exchange
+	"LN": ".L",  // London
+	"GY": ".DE", // XETRA
+	"FP": ".PA", // Euronext Paris
+	"NA": ".AS", // Euronext Amsterdam
+	"SM": ".MC", // Madrid
+	"IM": ".MI", // Milan
+	"SS": ".ST", // Stockholm
+	"DC": ".CO", // Copenhagen
+	"OS": ".OL", // Oslo
+}
+
+func cleanYuhTicker(asset string) string {
+	// "CHDVD SW Equity" → "CHDVD.SW"; plain tickers pass through unchanged.
+	parts := strings.Fields(asset)
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) >= 2 {
+		if suffix, ok := yuhBloombergSuffix[parts[len(parts)-2]]; ok {
+			return parts[0] + suffix
+		}
+	}
+	return parts[0]
+}
+
+// parseYuhCSV parses a Yuh ACTIVITIES_REPORT CSV export (semicolon-delimited, BOM).
+func parseYuhCSV(content string) ([]YuhTransaction, error) {
+	// Strip UTF-8 BOM if present.
+	content = strings.TrimPrefix(content, "\xef\xbb\xbf")
+
+	r := csv.NewReader(strings.NewReader(content))
+	r.Comma = ';'
+	r.LazyQuotes = true
+	r.TrimLeadingSpace = true
+	records, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(records) < 2 {
+		return nil, nil
+	}
+	headers := make(map[string]int, len(records[0]))
+	for i, h := range records[0] {
+		headers[strings.ToLower(strings.TrimSpace(h))] = i
+	}
+	get := func(row []string, h string) string {
+		idx, ok := headers[h]
+		if !ok || idx >= len(row) {
+			return ""
+		}
+		return strings.TrimSpace(row[idx])
+	}
+	pf := func(s string) float64 {
+		s = strings.ReplaceAll(s, ",", ".")
+		v, _ := strconv.ParseFloat(s, 64)
+		return v
+	}
+	// Convert DD/MM/YYYY → YYYY-MM-DD.
+	parseDate := func(s string) string {
+		if len(s) == 10 && s[2] == '/' && s[5] == '/' {
+			return s[6:10] + "-" + s[3:5] + "-" + s[0:2]
+		}
+		return s
+	}
+
+	var txs []YuhTransaction
+	for _, row := range records[1:] {
+		actType := get(row, "activity type")
+		if actType != "INVEST_ORDER_EXECUTED" &&
+			actType != "CASH_TRANSACTION_RELATED_OTHER" &&
+			actType != "CASH_TRANSACTION_OTHER" {
+			continue
+		}
+		side := strings.ToUpper(get(row, "buy/sell"))
+		asset := strings.Trim(get(row, "asset"), `"`)
+		// For invest orders, skip rows with no asset or SWQ (Yuh loyalty points).
+		if actType == "INVEST_ORDER_EXECUTED" && (asset == "" || asset == "SWQ") {
+			continue
+		}
+		date := parseDate(get(row, "date"))
+		if date == "" {
+			continue
+		}
+		txs = append(txs, YuhTransaction{
+			Date:           date,
+			ActivityType:   actType,
+			Name:           strings.Trim(get(row, "activity name"), `"`),
+			Debit:          math.Abs(pf(get(row, "debit"))),
+			DebitCurrency:  get(row, "debit currency"),
+			Credit:         pf(get(row, "credit")),
+			CreditCurrency: get(row, "credit currency"),
+			Fee:            math.Abs(pf(get(row, "fees/commission"))),
+			Side:           side,
+			Quantity:       math.Abs(pf(get(row, "quantity"))),
+			Asset:          cleanYuhTicker(asset),
+			PricePerUnit:   pf(get(row, "price per unit")),
+		})
+	}
+	sort.Slice(txs, func(i, j int) bool { return txs[i].Date < txs[j].Date })
+	return txs, nil
+}
+
+// YuhYearRecord holds activity for one calendar year, all in EUR.
+type YuhYearRecord struct {
+	Year        string  `json:"year"`
+	Invested    float64 `json:"invested"`    // total cost of BUYs
+	RealizedPnL float64 `json:"realizedPnL"` // gains/losses from SELLs
+	Dividends   float64 `json:"dividends"`   // CASH_TRANSACTION_RELATED_OTHER (dividends, capital gain distributions)
+	Interest    float64 `json:"interest"`    // CASH_TRANSACTION_OTHER (cash deposit interest)
+	Total       float64 `json:"total"`       // RealizedPnL + Dividends + Interest
+}
+
+// calcYuhData runs a single FIFO pass over all transactions and returns:
+//   - open positions (costs in EUR via annual avg FX rates)
+//   - per-year realized P&L and dividends (also in EUR)
+//
+// fxByYearCur maps "CHF:2024" → average EURCHF rate for 2024.
+func calcYuhData(txs []YuhTransaction, fxByYearCur map[string]float64) ([]OpenPosition, []YuhYearRecord) {
+	type lot struct{ shares, unitCostEUR float64 }
+	fifo  := map[string][]lot{}
+	names := map[string]string{}
+
+	investedByYear  := map[string]float64{}
+	realizedByYear  := map[string]float64{}
+	dividendsByYear := map[string]float64{}
+	interestByYear  := map[string]float64{}
+
+	toEUR := func(amount float64, cur, year string) float64 {
+		if cur == "" || cur == "EUR" {
+			return amount
+		}
+		if rate, ok := fxByYearCur[cur+":"+year]; ok && rate > 0 {
+			return amount / rate
+		}
+		return amount
+	}
+
+	for _, t := range txs {
+		year := ""
+		if len(t.Date) >= 4 {
+			year = t.Date[:4]
+		}
+
+		switch t.ActivityType {
+		case "INVEST_ORDER_EXECUTED":
+			sym := t.Asset
+			if t.Name != "" {
+				names[sym] = t.Name
+			}
+			switch t.Side {
+			case "BUY":
+				totalCost := t.Debit // abs; Yuh gross debit = price×qty + fee
+				if totalCost == 0 && t.PricePerUnit > 0 {
+					totalCost = t.Quantity*t.PricePerUnit + t.Fee
+				}
+				costEUR := toEUR(totalCost, t.DebitCurrency, year)
+				uc := 0.0
+				if t.Quantity > 0 {
+					uc = costEUR / t.Quantity
+				}
+				fifo[sym] = append(fifo[sym], lot{t.Quantity, uc})
+				investedByYear[year] += costEUR
+			case "SELL":
+				// Proceeds are net of fees (Yuh credits net amount).
+				proceedsEUR := toEUR(t.Credit, t.CreditCurrency, year)
+				qty := t.Quantity
+				var costBasis float64
+				q := fifo[sym]
+				for qty > 1e-9 && len(q) > 0 {
+					take := math.Min(qty, q[0].shares)
+					costBasis += take * q[0].unitCostEUR
+					qty -= take
+					q[0].shares -= take
+					if q[0].shares < 1e-9 {
+						q = q[1:]
+					}
+				}
+				fifo[sym] = q
+				realizedByYear[year] += proceedsEUR - costBasis
+			}
+		case "CASH_TRANSACTION_RELATED_OTHER":
+			if t.Credit > 0 {
+				dividendsByYear[year] += toEUR(t.Credit, t.CreditCurrency, year)
+			}
+		case "CASH_TRANSACTION_OTHER":
+			if t.Credit > 0 {
+				interestByYear[year] += toEUR(t.Credit, t.CreditCurrency, year)
+			}
+		}
+	}
+
+	// Build open positions.
+	var positions []OpenPosition
+	for sym, lots := range fifo {
+		var totalShares, totalCostEUR float64
+		for _, l := range lots {
+			totalShares += l.shares
+			totalCostEUR += l.shares * l.unitCostEUR
+		}
+		if totalShares < 1e-9 {
+			continue
+		}
+		avgCost := 0.0
+		if totalShares > 0 {
+			avgCost = totalCostEUR / totalShares
+		}
+		positions = append(positions, OpenPosition{
+			Symbol:    sym,
+			Name:      names[sym],
+			Shares:    totalShares,
+			AvgCost:   avgCost,
+			TotalCost: totalCostEUR,
+		})
+	}
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].TotalCost > positions[j].TotalCost
+	})
+
+	// Build year records — union of keys from all maps.
+	allYears := map[string]struct{}{}
+	for y := range investedByYear  { allYears[y] = struct{}{} }
+	for y := range realizedByYear  { allYears[y] = struct{}{} }
+	for y := range dividendsByYear { allYears[y] = struct{}{} }
+	for y := range interestByYear  { allYears[y] = struct{}{} }
+	var yearRecords []YuhYearRecord
+	for y := range allYears {
+		pnl := realizedByYear[y]
+		div := dividendsByYear[y]
+		interest := interestByYear[y]
+		yearRecords = append(yearRecords, YuhYearRecord{
+			Year: y, Invested: investedByYear[y],
+			RealizedPnL: pnl, Dividends: div, Interest: interest,
+			Total: pnl + div + interest,
+		})
+	}
+	sort.Slice(yearRecords, func(i, j int) bool {
+		return yearRecords[i].Year < yearRecords[j].Year
+	})
+	return positions, yearRecords
 }

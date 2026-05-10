@@ -680,6 +680,267 @@ func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
 }
 
+// ── Yuh — filesystem storage ─────────────────────────────────────────────────
+
+type PerfYuhResponse struct {
+	Files     []string        `json:"files"`
+	Positions []OpenPosition  `json:"positions"`
+	Years     []YuhYearRecord `json:"years"`
+}
+
+func perfYuhDir(userID string) string {
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, userID)
+	return filepath.Join("files", "performance", safe, "yuh")
+}
+
+func perfYuhResultPath(userID string) string {
+	return filepath.Join(perfYuhDir(userID), "result.json")
+}
+
+func perfYuhPricesPath(userID string) string {
+	return filepath.Join(perfYuhDir(userID), "prices.json")
+}
+
+func (s *Server) computeAndCacheYuh(userID string) (*PerfYuhResponse, error) {
+	dir := perfYuhDir(userID)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return &PerfYuhResponse{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var allTxs []YuhTransaction
+	var fileNames []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(strings.ToUpper(name), ".CSV") || name == "result.json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", name, err)
+		}
+		txs, err := parseYuhCSV(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", name, err)
+		}
+		allTxs = append(allTxs, txs...)
+		fileNames = append(fileNames, name)
+	}
+	sort.Slice(allTxs, func(i, j int) bool { return allTxs[i].Date < allTxs[j].Date })
+	sort.Strings(fileNames)
+
+	// Collect unique (currency, year) pairs from all transactions to fetch annual avg FX rates.
+	type curYear struct{ cur, year string }
+	pairs := map[curYear]struct{}{}
+	addPair := func(cur, date string) {
+		if cur != "" && cur != "EUR" && len(date) >= 4 {
+			pairs[curYear{cur, date[:4]}] = struct{}{}
+		}
+	}
+	for _, t := range allTxs {
+		switch t.ActivityType {
+		case "INVEST_ORDER_EXECUTED":
+			addPair(t.DebitCurrency, t.Date)  // BUY cost currency
+			addPair(t.CreditCurrency, t.Date) // SELL proceeds currency
+		case "CASH_TRANSACTION_RELATED_OTHER", "CASH_TRANSACTION_OTHER":
+			addPair(t.CreditCurrency, t.Date) // dividend currency
+		}
+	}
+	fxByYearCur := map[string]float64{} // "CHF:2024" → avg EURCHF rate for 2024
+	if len(pairs) > 0 {
+		fxCtx, fxCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer fxCancel()
+		var fxMu sync.Mutex
+		var fxWg sync.WaitGroup
+		for p := range pairs {
+			p := p
+			fxWg.Add(1)
+			go func() {
+				defer fxWg.Done()
+				yr := 0
+				fmt.Sscanf(p.year, "%d", &yr)
+				rate := fetchAnnualAvgFXRate(fxCtx, "EUR"+p.cur+"=X", yr)
+				if rate > 0 {
+					fxMu.Lock()
+					fxByYearCur[p.cur+":"+p.year] = rate
+					fxMu.Unlock()
+				}
+			}()
+		}
+		fxWg.Wait()
+	}
+
+	positions, yearRecords := calcYuhData(allTxs, fxByYearCur)
+	resp := &PerfYuhResponse{Files: fileNames, Positions: positions, Years: yearRecords}
+	if data, err := json.Marshal(resp); err == nil {
+		_ = os.WriteFile(perfYuhResultPath(userID), data, 0o644)
+	}
+	return resp, nil
+}
+
+func (s *Server) getYuh(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromCtx(r)
+	var resp *PerfYuhResponse
+	if data, err := os.ReadFile(perfYuhResultPath(userID)); err == nil {
+		var cached PerfYuhResponse
+		if json.Unmarshal(data, &cached) == nil && cached.Positions != nil && cached.Years != nil {
+			resp = &cached
+		}
+	}
+	if resp == nil {
+		var err error
+		resp, err = s.computeAndCacheYuh(userID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if len(resp.Positions) > 0 {
+		syms := make([]string, len(resp.Positions))
+		for i, p := range resp.Positions {
+			syms[i] = p.Symbol
+		}
+
+		pricesPath := perfYuhPricesPath(userID)
+		var quotes map[string]yahooQuote
+		if c := loadPricesCacheFrom(pricesPath); c != nil && len(c.Quotes) > 0 {
+			quotes = c.Quotes
+		} else {
+			fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			quotes = fetchYahooPrices(fetchCtx, syms)
+			if len(quotes) > 0 {
+				savePricesCacheTo(pricesPath, quotes)
+			}
+		}
+
+		// Costs are already in EUR (converted via annual avg FX rates at compute time).
+		// Only price currency needs today's spot rate for EUR conversion.
+		priceCurrencies := map[string]struct{}{}
+		for _, p := range resp.Positions {
+			if q, ok := quotes[p.Symbol]; ok && q.Currency != "" && q.Currency != "EUR" {
+				priceCurrencies[q.Currency] = struct{}{}
+			}
+		}
+		spotRates := map[string]float64{}
+		if len(priceCurrencies) > 0 {
+			fxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var fxMu sync.Mutex
+			var fxWg sync.WaitGroup
+			for cur := range priceCurrencies {
+				cur := cur
+				fxWg.Add(1)
+				go func() {
+					defer fxWg.Done()
+					if q, ok := fetchYahooPrice(fxCtx, "EUR"+cur+"=X"); ok {
+						fxMu.Lock()
+						spotRates[cur] = q.Price
+						fxMu.Unlock()
+					}
+				}()
+			}
+			fxWg.Wait()
+		}
+
+		for i, p := range resp.Positions {
+			q, ok := quotes[p.Symbol]
+			if !ok {
+				continue
+			}
+			priceEUR := q.Price
+			if q.Currency != "EUR" {
+				if rate, ok := spotRates[q.Currency]; ok && rate > 0 {
+					priceEUR = q.Price / rate
+				}
+			}
+			resp.Positions[i].Price = q.Price
+			resp.Positions[i].Value = priceEUR * p.Shares
+			resp.Positions[i].PnL = resp.Positions[i].Value - p.TotalCost
+			resp.Positions[i].PnLPct = resp.Positions[i].PnL / p.TotalCost * 100
+			resp.Positions[i].Currency = q.Currency
+			resp.Positions[i].HasPrice = true
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) postYuh(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 5<<20))
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+	txs, err := parseYuhCSV(string(body))
+	if err != nil {
+		http.Error(w, "invalid CSV: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(txs) == 0 {
+		http.Error(w, "no transactions found", http.StatusBadRequest)
+		return
+	}
+
+	// Derive a stable filename from the first line of the file (report ID in original name).
+	// The multipart filename isn't available here, so use a hash of content.
+	filename := fmt.Sprintf("yuh_%x.csv", fnv32(body))
+
+	userID := userIDFromCtx(r)
+	if err := os.MkdirAll(perfYuhDir(userID), 0o755); err != nil {
+		http.Error(w, "mkdir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(perfYuhDir(userID), filename), body, 0o644); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = os.Remove(perfYuhResultPath(userID))
+	resp, err := s.computeAndCacheYuh(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) deleteYuhFile(w http.ResponseWriter, r *http.Request) {
+	filename := strings.TrimPrefix(r.URL.Path, "/api/performance/yuh/")
+	if filename == "" || strings.Contains(filename, "/") {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+	userID := userIDFromCtx(r)
+	_ = os.Remove(filepath.Join(perfYuhDir(userID), filename))
+	_ = os.Remove(perfYuhResultPath(userID))
+	resp, err := s.computeAndCacheYuh(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func fnv32(data []byte) uint32 {
+	h := uint32(2166136261)
+	for _, b := range data {
+		h ^= uint32(b)
+		h *= 16777619
+	}
+	return h
+}
+
 // ---- Performance (Trade Republic) — filesystem storage ----------------------
 //
 // CSV files  : files/performance/{userID}/tr/tr_{year}.csv
@@ -723,6 +984,31 @@ func (s *Server) getAIRec(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"content": content})
 }
 
+func (s *Server) getYuhAIRec(w http.ResponseWriter, r *http.Request) {
+	content, err := s.store.GetYuhAIRec(r.Context(), userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"content": content})
+}
+
+func (s *Server) putYuhAIRec(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.PutYuhAIRec(r.Context(), userIDFromCtx(r), body.Content); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) putAIRec(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Content string `json:"content"`
@@ -738,7 +1024,7 @@ func (s *Server) putAIRec(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-const pricesCacheTTL = 15 * time.Minute
+const pricesCacheTTL = 4 * time.Hour
 
 type pricesCache struct {
 	UpdatedAt time.Time             `json:"updatedAt"`
@@ -746,7 +1032,15 @@ type pricesCache struct {
 }
 
 func loadPricesCache(userID string) *pricesCache {
-	data, err := os.ReadFile(perfTRPricesPath(userID))
+	return loadPricesCacheFrom(perfTRPricesPath(userID))
+}
+
+func savePricesCache(userID string, quotes map[string]yahooQuote) {
+	savePricesCacheTo(perfTRPricesPath(userID), quotes)
+}
+
+func loadPricesCacheFrom(path string) *pricesCache {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -760,10 +1054,10 @@ func loadPricesCache(userID string) *pricesCache {
 	return &c
 }
 
-func savePricesCache(userID string, quotes map[string]yahooQuote) {
+func savePricesCacheTo(path string, quotes map[string]yahooQuote) {
 	c := pricesCache{UpdatedAt: time.Now(), Quotes: quotes}
 	if data, err := json.Marshal(c); err == nil {
-		_ = os.WriteFile(perfTRPricesPath(userID), data, 0o644)
+		_ = os.WriteFile(path, data, 0o644)
 	}
 }
 
@@ -919,6 +1213,62 @@ func resolveISINs(ctx context.Context, isins []string) map[string]string {
 		}
 	}
 	return mapping
+}
+
+// fetchAnnualAvgFXRate returns the average of monthly closes for fxTicker (e.g. "EURCHF=X")
+// over the given calendar year. For the current year it returns today's rate instead.
+func fetchAnnualAvgFXRate(ctx context.Context, fxTicker string, year int) float64 {
+	if year >= time.Now().Year() {
+		if q, ok := fetchYahooPrice(ctx, fxTicker); ok {
+			return q.Price
+		}
+		return 0
+	}
+	loc := time.UTC
+	period1 := time.Date(year, 1, 1, 0, 0, 0, 0, loc).Unix()
+	period2 := time.Date(year+1, 1, 1, 0, 0, 0, 0, loc).Unix()
+	u := fmt.Sprintf("https://query2.finance.yahoo.com/v8/finance/chart/%s?period1=%d&period2=%d&interval=1mo",
+		url.PathEscape(fxTicker), period1, period2)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return 0
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return 0
+	}
+	defer resp.Body.Close()
+	var cr struct {
+		Chart struct {
+			Result []struct {
+				Indicators struct {
+					Quote []struct {
+						Close []float64 `json:"close"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+		} `json:"chart"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&cr) != nil || len(cr.Chart.Result) == 0 {
+		return 0
+	}
+	quotes := cr.Chart.Result[0].Indicators.Quote
+	if len(quotes) == 0 {
+		return 0
+	}
+	var sum float64
+	var n int
+	for _, c := range quotes[0].Close {
+		if c > 0 {
+			sum += c
+			n++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
 }
 
 func fetchYahooPrice(ctx context.Context, ticker string) (yahooQuote, bool) {
@@ -1345,6 +1695,34 @@ func (s *Server) routes() http.Handler {
 			s.getPrompt(w, r)
 		case http.MethodPut:
 			s.putPrompt(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/performance/yuh/ai-rec", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getYuhAIRec(w, r)
+		case http.MethodPut:
+			s.putYuhAIRec(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	protected.HandleFunc("/api/performance/yuh/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.deleteYuhFile(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	protected.HandleFunc("/api/performance/yuh", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getYuh(w, r)
+		case http.MethodPost:
+			s.postYuh(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

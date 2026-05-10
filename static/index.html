@@ -730,7 +730,7 @@
 <div class="perf-view">
   <div class="perf-subtabs">
     <button class="perf-subtab active" onclick="perfSwitchTab('tr')">Trade Republic</button>
-    <button class="perf-subtab" onclick="perfSwitchTab('yuh')" disabled>Yuh</button>
+    <button class="perf-subtab" onclick="perfSwitchTab('yuh')">Yuh</button>
     <button class="perf-subtab" onclick="perfSwitchTab('global')" disabled>Vue globale</button>
   </div>
 
@@ -749,11 +749,17 @@
   </div>
 
   <div id="perf-tab-yuh" style="display:none">
-    <div class="perf-empty">
-      <div class="perf-empty-icon">🚧</div>
-      <div class="perf-empty-title">Coming soon</div>
-      <div class="perf-empty-desc">Yuh support is under development.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+      <div class="perf-tr-dropzone" id="perf-yuh-drop" style="flex:1;margin-bottom:0;cursor:pointer"
+           ondragover="yuhDragOver(event)" ondragleave="yuhDragLeave(event)" ondrop="yuhDrop(event)">
+        <input type="file" id="perf-yuh-input" accept=".csv" multiple style="display:none">
+        <span id="perf-yuh-drop-label">Select Yuh activity CSV files</span>
+        <span style="color:#8b949e;font-size:12px;margin-left:8px">(.csv)</span>
+      </div>
+      <button id="perf-yuh-import-btn" class="btn btn-ghost" disabled onclick="yuhImportStaged()">Import</button>
     </div>
+    <div id="perf-yuh-staged"></div>
+    <div id="perf-yuh-content"></div>
   </div>
 </div>
 </div><!-- /view-performance -->
@@ -2169,7 +2175,9 @@ initPortfolioClicks();
 
 // Declare perf state vars before any calls that may reference them
 let perfTrData = null;
+let perfYuhData = null;
 let stagedFiles = [];
+let yuhStagedFiles = [];
 
 loadUser();
 load();
@@ -2185,10 +2193,21 @@ document.getElementById('perf-tr-input').addEventListener('change', function() {
 document.getElementById('perf-tr-drop').addEventListener('click', function() {
   document.getElementById('perf-tr-input').click();
 });
+document.getElementById('perf-yuh-input').addEventListener('change', function() {
+  if (this.files && this.files.length > 0) yuhStageFiles(this.files);
+  this.value = '';
+});
+document.getElementById('perf-yuh-drop').addEventListener('click', function() {
+  document.getElementById('perf-yuh-input').click();
+});
 switchView(
   location.pathname === '/report'       ? 'report'       :
   location.pathname === '/calendar'     ? 'calendar'     :
   location.pathname === '/performance'  ? 'performance'  : 'stocks', false);
+if (location.pathname === '/performance' && location.hash) {
+  const tab = location.hash.slice(1);
+  if (['yuh', 'global'].includes(tab)) perfSwitchTab(tab);
+}
 
 // ---- Performance view --------------------------------------------------------
 
@@ -2215,6 +2234,8 @@ function perfSwitchTab(tab) {
   });
   document.getElementById('perf-tab-tr').style.display  = tab === 'tr'  ? '' : 'none';
   document.getElementById('perf-tab-yuh').style.display = tab === 'yuh' ? '' : 'none';
+  if (tab === 'yuh' && perfYuhData === null) loadYuhData();
+  history.replaceState(null, '', location.pathname + (tab !== 'tr' ? '#' + tab : ''));
 }
 
 // ─── Drag & drop ─────────────────────────────────────────────────────────────
@@ -2317,6 +2338,184 @@ async function perfTrRemoveYear(year) {
   } catch(e) {
     showToast(`Error: ${e.message}`);
   }
+}
+
+// ─── Yuh ─────────────────────────────────────────────────────────────────────
+
+async function loadYuhData() {
+  const el = document.getElementById('perf-yuh-content');
+  if (el) el.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Loading…</div></div>';
+  try {
+    const resp = await fetch('/api/performance/yuh');
+    perfYuhData = resp.ok ? await resp.json() : { files: [], positions: [] };
+  } catch(e) {
+    perfYuhData = { files: [], positions: [] };
+  }
+  try {
+    const recResp = await fetch('/api/performance/yuh/ai-rec');
+    if (recResp.ok) {
+      const recData = await recResp.json();
+      if (perfYuhData) perfYuhData.aiRec = recData.content || '';
+    }
+  } catch(e) { /* ignore */ }
+  renderYuhTab();
+}
+
+function yuhDragOver(e) {
+  e.preventDefault();
+  document.getElementById('perf-yuh-drop').classList.add('drag-over');
+}
+function yuhDragLeave(e) {
+  document.getElementById('perf-yuh-drop').classList.remove('drag-over');
+}
+function yuhDrop(e) {
+  e.preventDefault();
+  document.getElementById('perf-yuh-drop').classList.remove('drag-over');
+  yuhStageFiles(e.dataTransfer.files);
+}
+
+function yuhStageFiles(fileList) {
+  for (const f of fileList) {
+    if (!yuhStagedFiles.find(s => s.name === f.name && s.size === f.size)) {
+      yuhStagedFiles.push(f);
+    }
+  }
+  renderYuhStagedFiles();
+}
+
+function yuhRemoveStaged(idx) {
+  yuhStagedFiles.splice(idx, 1);
+  renderYuhStagedFiles();
+}
+
+function renderYuhStagedFiles() {
+  const btn   = document.getElementById('perf-yuh-import-btn');
+  const label = document.getElementById('perf-yuh-drop-label');
+  const el    = document.getElementById('perf-yuh-staged');
+  if (yuhStagedFiles.length === 0) {
+    btn.disabled = true;
+    btn.className = 'btn btn-ghost';
+    btn.textContent = 'Import';
+    label.textContent = 'Select Yuh activity CSV files';
+    el.innerHTML = '';
+    return;
+  }
+  btn.disabled = false;
+  btn.className = 'btn btn-primary';
+  btn.textContent = 'Import';
+  label.textContent = yuhStagedFiles.map(f => f.name).join(', ');
+  el.innerHTML = yuhStagedFiles.map((f, i) =>
+    `<div class="perf-staged-file">
+       <span>${f.name}</span>
+       <button onclick="yuhRemoveStaged(${i})">✕</button>
+     </div>`
+  ).join('');
+}
+
+async function yuhImportStaged() {
+  const files = yuhStagedFiles.slice();
+  yuhStagedFiles = [];
+  renderYuhStagedFiles();
+  for (const f of files) {
+    try {
+      const text = await readFile(f);
+      const resp = await fetch('/api/performance/yuh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: text,
+      });
+      if (!resp.ok) { showToast(`Upload error: ${await resp.text()}`); continue; }
+      perfYuhData = await resp.json();
+      renderYuhTab();
+    } catch(e) {
+      showToast(`Error: ${e.message}`);
+    }
+  }
+}
+
+async function yuhRemoveFile(filename) {
+  if (!confirm(`Delete ${filename}?`)) return;
+  try {
+    const resp = await fetch(`/api/performance/yuh/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (!resp.ok) { showToast(`Error: ${await resp.text()}`); return; }
+    perfYuhData = await resp.json();
+    renderYuhTab();
+  } catch(e) {
+    showToast(`Error: ${e.message}`);
+  }
+}
+
+function renderYuhTab() {
+  const el = document.getElementById('perf-yuh-content');
+  if (!el) return;
+  if (perfYuhData === null) {
+    el.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Loading…</div></div>';
+    return;
+  }
+  const files = perfYuhData.files || [];
+  const positions = perfYuhData.positions || [];
+  if (!files.length && !positions.length) {
+    el.innerHTML = `<div class="perf-empty">
+      <div class="perf-empty-icon">📊</div>
+      <div class="perf-empty-title">No data yet</div>
+      <div class="perf-empty-desc">Import your Yuh activity CSV exports<br>to see your portfolio.</div>
+    </div>`;
+    return;
+  }
+  const filesHtml = files.length ? `<div style="margin-bottom:16px">
+    ${files.map(f => `<div class="perf-staged-file">
+      <span style="color:#8b949e;font-size:12px">📄</span>
+      <span>${f}</span>
+      <button onclick="yuhRemoveFile('${f}')">✕</button>
+    </div>`).join('')}
+  </div>` : '';
+  const aiRec = perfYuhData ? (perfYuhData.aiRec || '') : '';
+  const aiRecHtml = `<div class="perf-ai-rec-wrap">
+    <label class="perf-ai-rec-label">AI Recommendation</label>
+    <div id="perf-yuh-ai-rec-view" class="perf-ai-rec-view${aiRec ? '' : ' empty'}" onclick="yuhAIRecStartEdit()">${aiRec ? escapeHtml(aiRec) : 'Click to add an AI recommendation…'}</div>
+    <textarea id="perf-yuh-ai-rec" class="perf-ai-rec" placeholder="Paste the AI analysis here…" style="display:none" oninput="saveYuhAIRec(this.value)" onblur="yuhAIRecStopEdit()">${aiRec}</textarea>
+  </div>`;
+  const yearsHtml = renderYuhYears(perfYuhData.years || []);
+  el.innerHTML = filesHtml + renderPortfolioSection(positions) + yearsHtml + aiRecHtml;
+}
+
+function renderYuhYears(years) {
+  if (!years || years.length === 0) return '';
+  const currentYear = new Date().getFullYear().toString();
+  const fmtAmt = n => {
+    const s = Math.abs(n).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    return `${s} €`;
+  };
+  const fmtPnl = n => {
+    if (n == null || isNaN(n) || Math.abs(n) < 0.005) return '<span class="perf-mc-zero">—</span>';
+    const s = Math.abs(n).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    return `<span class="${n >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${n >= 0 ? '+' : '−'}${s} €</span>`;
+  };
+  const rows = years.slice().reverse().map(y => {
+    const badge = y.year === currentYear ? ' <span class="perf-year-current">current</span>' : '';
+    return `<tr>
+      <td class="perf-rl"><strong>${y.year}</strong>${badge}</td>
+      <td class="perf-mc">${y.invested > 0 ? fmtAmt(y.invested) : '<span class="perf-mc-zero">—</span>'}</td>
+      <td class="perf-mc">${fmtPnl(y.realizedPnL)}</td>
+      <td class="perf-mc">${fmtPnl(y.dividends)}</td>
+      <td class="perf-mc">${fmtPnl(y.interest)}</td>
+      <td class="perf-mc perf-net-cell">${fmtPnl(y.total)}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="perf-section-title" style="margin-top:36px">Activité par année</div>
+  <div class="perf-year-section">
+    <table class="perf-month-table">
+      <thead><tr>
+        <th></th>
+        <th class="perf-mc">Investi</th>
+        <th class="perf-mc">P&amp;L réalisé</th>
+        <th class="perf-mc">Dividendes</th>
+        <th class="perf-mc">Intérêts</th>
+        <th class="perf-mc">Total P&amp;L</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
@@ -2500,11 +2699,6 @@ function renderPortfolioSection(positions) {
         <div class="perf-pie-legend">${legendHtml}</div>
       </div>
     </div>
-    <div class="perf-ai-rec-wrap">
-      <label class="perf-ai-rec-label">AI Recommendation</label>
-      <div id="perf-ai-rec-view" class="perf-ai-rec-view${perfTrData && perfTrData.aiRec ? '' : ' empty'}" onclick="aiRecStartEdit()">${perfTrData && perfTrData.aiRec ? escapeHtml(perfTrData.aiRec) : 'Click to add an AI recommendation…'}</div>
-      <textarea id="perf-ai-rec" class="perf-ai-rec" placeholder="Paste the AI analysis here…" style="display:none" oninput="saveAIRec(this.value)" onblur="aiRecStopEdit()">${perfTrData && perfTrData.aiRec ? perfTrData.aiRec : ''}</textarea>
-    </div>
   </div>`;
 }
 
@@ -2530,6 +2724,39 @@ function aiRecStopEdit() {
   view.innerHTML  = val ? escapeHtml(val) : 'Click to add an AI recommendation…';
   ta.style.display   = 'none';
   view.style.display = 'block';
+}
+
+function yuhAIRecStartEdit() {
+  const view = document.getElementById('perf-yuh-ai-rec-view');
+  const ta   = document.getElementById('perf-yuh-ai-rec');
+  if (!view || !ta) return;
+  view.style.display = 'none';
+  ta.style.display   = 'block';
+  ta.focus();
+}
+
+function yuhAIRecStopEdit() {
+  const view = document.getElementById('perf-yuh-ai-rec-view');
+  const ta   = document.getElementById('perf-yuh-ai-rec');
+  if (!view || !ta) return;
+  const val = ta.value;
+  view.className = 'perf-ai-rec-view' + (val ? '' : ' empty');
+  view.innerHTML  = val ? escapeHtml(val) : 'Click to add an AI recommendation…';
+  ta.style.display   = 'none';
+  view.style.display = 'block';
+}
+
+let yuhAIRecDebounce = null;
+function saveYuhAIRec(value) {
+  if (perfYuhData) perfYuhData.aiRec = value;
+  clearTimeout(yuhAIRecDebounce);
+  yuhAIRecDebounce = setTimeout(() => {
+    fetch('/api/performance/yuh/ai-rec', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: value }),
+    });
+  }, 800);
 }
 
 let aiRecDebounce = null;
@@ -2564,10 +2791,16 @@ function renderTrTab() {
     return;
   }
 
+  const aiRec = perfTrData.aiRec || '';
+  const trAiRecHtml = `<div class="perf-ai-rec-wrap">
+    <label class="perf-ai-rec-label">AI Recommendation</label>
+    <div id="perf-ai-rec-view" class="perf-ai-rec-view${aiRec ? '' : ' empty'}" onclick="aiRecStartEdit()">${aiRec ? escapeHtml(aiRec) : 'Click to add an AI recommendation…'}</div>
+    <textarea id="perf-ai-rec" class="perf-ai-rec" placeholder="Paste the AI analysis here…" style="display:none" oninput="saveAIRec(this.value)" onblur="aiRecStopEdit()">${aiRec}</textarea>
+  </div>`;
   const portfolioHtml = renderPortfolioSection(perfTrData.positions || []);
   const monthly = perfTrData.monthly || {};
   const divider = portfolioHtml ? '<div class="perf-section-title" style="margin-top:36px">P&amp;L History</div>' : '';
-  el.innerHTML = portfolioHtml + divider + years.map(year => {
+  el.innerHTML = portfolioHtml + trAiRecHtml + divider + years.map(year => {
     const yObj = (perfTrData.years || []).find(y => y.year === year) || {};
     const months = [];
     for (let m = 1; m <= 12; m++) {
