@@ -2369,6 +2369,8 @@ async function trImportStaged() {
       showToast(`Error: ${e.message}`);
     }
   }
+  const trEl = document.getElementById('perf-tr-content');
+  if (trEl) trEl.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Refreshing data…</div></div>';
   await loadPerfData();
 }
 
@@ -2473,6 +2475,8 @@ async function yuhImportStaged() {
       showToast(`Error: ${e.message}`);
     }
   }
+  const yuhEl = document.getElementById('perf-yuh-content');
+  if (yuhEl) yuhEl.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Refreshing data…</div></div>';
   await loadYuhData();
 }
 
