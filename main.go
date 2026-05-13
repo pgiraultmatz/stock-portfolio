@@ -1486,6 +1486,7 @@ func (s *Server) postPerfTR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = os.Remove(perfTRPricesPath(userID)) // invalidate price cache so new ISINs are re-resolved
 	resp, err := s.computeAndCachePerfTR(userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1503,7 +1504,8 @@ func (s *Server) deletePerfTRYear(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := userIDFromCtx(r)
 	_ = os.Remove(perfTRCSVPath(userID, year))
-	_ = os.Remove(perfTRResultPath(userID)) // invalidate cache
+	_ = os.Remove(perfTRResultPath(userID))  // invalidate result cache
+	_ = os.Remove(perfTRPricesPath(userID))  // invalidate price cache
 	resp, err := s.computeAndCachePerfTR(userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
