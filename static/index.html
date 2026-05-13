@@ -2365,12 +2365,11 @@ async function trImportStaged() {
         body: text,
       });
       if (!resp.ok) { showToast(`Upload error: ${await resp.text()}`); continue; }
-      perfTrData = await resp.json();
-      renderTrTab();
     } catch(e) {
       showToast(`Error: ${e.message}`);
     }
   }
+  await loadPerfData();
 }
 
 async function perfTrRemoveYear(year) {
@@ -2378,11 +2377,11 @@ async function perfTrRemoveYear(year) {
   try {
     const resp = await fetch(`/api/performance/tr/${year}`, { method: 'DELETE' });
     if (!resp.ok) { showToast(`Error: ${await resp.text()}`); return; }
-    perfTrData = await resp.json();
-    renderTrTab();
   } catch(e) {
     showToast(`Error: ${e.message}`);
+    return;
   }
+  await loadPerfData();
 }
 
 // ─── Yuh ─────────────────────────────────────────────────────────────────────
@@ -2470,12 +2469,11 @@ async function yuhImportStaged() {
         body: text,
       });
       if (!resp.ok) { showToast(`Upload error: ${await resp.text()}`); continue; }
-      perfYuhData = await resp.json();
-      renderYuhTab();
     } catch(e) {
       showToast(`Error: ${e.message}`);
     }
   }
+  await loadYuhData();
 }
 
 async function yuhRemoveFile(filename) {
@@ -2483,11 +2481,11 @@ async function yuhRemoveFile(filename) {
   try {
     const resp = await fetch(`/api/performance/yuh/${encodeURIComponent(filename)}`, { method: 'DELETE' });
     if (!resp.ok) { showToast(`Error: ${await resp.text()}`); return; }
-    perfYuhData = await resp.json();
-    renderYuhTab();
   } catch(e) {
     showToast(`Error: ${e.message}`);
+    return;
   }
+  await loadYuhData();
 }
 
 function renderYuhTab() {
