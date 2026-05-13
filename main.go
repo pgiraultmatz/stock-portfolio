@@ -1206,10 +1206,20 @@ func resolveISINs(ctx context.Context, isins []string) map[string]string {
 		}
 		resp.Body.Close()
 		for i, r := range results {
-			if r.Error == "" && len(r.Data) > 0 {
-				m := r.Data[0]
-				mapping[isins[start+i]] = figiToYahoo(m.Ticker, m.ExchCode)
+			if r.Error != "" || len(r.Data) == 0 {
+				continue
 			}
+			// Prefer the first match whose exchange code is in our suffix map
+			// (so e.g. FR ISINs resolve to the Paris listing, not a German one).
+			// Fall back to the first result (covers US stocks with no suffix).
+			best := r.Data[0]
+			for _, m := range r.Data {
+				if _, ok := openFIGIToYahooSuffix[m.ExchCode]; ok {
+					best = m
+					break
+				}
+			}
+			mapping[isins[start+i]] = figiToYahoo(best.Ticker, best.ExchCode)
 		}
 	}
 	return mapping
