@@ -51,7 +51,9 @@ type GistStore struct {
 	stockData     *StockDataFile
 }
 
-func NewGistStore(_ context.Context) (*GistStore, error) {
+const stockDataRefreshInterval = 30 * time.Minute
+
+func NewGistStore(ctx context.Context) (*GistStore, error) {
 	gistID := os.Getenv("GIST_ID")
 	token := os.Getenv("GH_TOKEN")
 	if gistID == "" {
@@ -61,7 +63,54 @@ func NewGistStore(_ context.Context) (*GistStore, error) {
 		return nil, fmt.Errorf("GH_TOKEN is required for gist storage backend")
 	}
 	s := &GistStore{gistID: gistID, githubToken: token}
-	return s, s.load()
+	if err := s.load(); err != nil {
+		return nil, err
+	}
+	go s.refreshStockDataLoop(ctx)
+	return s, nil
+}
+
+func (s *GistStore) refreshStockDataLoop(ctx context.Context) {
+	t := time.NewTicker(stockDataRefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.reloadStockData()
+		}
+	}
+}
+
+func (s *GistStore) reloadStockData() {
+	resp, err := s.gistRequest(http.MethodGet, "")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var gist struct {
+		Files map[string]struct {
+			Content string `json:"content"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&gist); err != nil {
+		return
+	}
+	d, ok := gist.Files["stock-data.json"]
+	if !ok {
+		return
+	}
+	var sd StockDataFile
+	if err := json.Unmarshal([]byte(d.Content), &sd); err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.stockData = &sd
+	s.mu.Unlock()
 }
 
 func (s *GistStore) gistRequest(method, body string) (*http.Response, error) {
