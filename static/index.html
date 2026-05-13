@@ -442,6 +442,7 @@
     .stock-row.dragging { opacity: 0.35; }
     .stock-row.insert-before { border-top: 2px solid #388bfd !important; }
     .stock-row.insert-after  { border-bottom: 2px solid #388bfd !important; }
+    .stock-row.filter-match  { background: #1c2d3a !important; outline: 1px solid #388bfd; border-radius: 4px; }
     .drag-handle { color: #30363d; font-size: 13px; margin-right: 8px; user-select: none; }
     .stock-name   { font-size: 13px; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; flex-shrink: 0; }
     .stock-ticker { font-size: 12px; font-weight: 400; color: #8b949e; font-family: 'SF Mono', monospace; text-decoration: none; }
@@ -707,6 +708,7 @@
     >
     <div class="suggestions" id="suggestions"></div>
   </div>
+  <input type="text" class="search-input" id="filter-input" placeholder="Filter ticker…" autocomplete="off" style="max-width:160px">
   <button id="save-btn" class="btn btn-export" onclick="saveToGist()" style="margin-left:auto">☁ Save</button>
 </div>
 </div><!-- /sticky-top-bar -->
@@ -1077,6 +1079,7 @@ function render() {
   document.getElementById('portfolio').innerHTML = html;
   bindPortfolioEvents();
   applyQuotes();
+  applyFilter();
 }
 
 const CONVICTION_OPTS = [
@@ -1489,6 +1492,48 @@ function bindPortfolioEvents() {
     });
   });
 }
+
+// ---- portfolio filter ----
+let filterQuery = '';
+
+function applyFilter() {
+  const q = filterQuery.toLowerCase();
+  document.querySelectorAll('#portfolio .cat-section').forEach(section => {
+    let anyMatch = false;
+    section.querySelectorAll('.stock-item').forEach(item => {
+      const row = item.querySelector('.stock-row[data-ticker]');
+      if (!row) return;
+      const ticker = (row.dataset.ticker || '').toLowerCase();
+      const nameEl = row.querySelector('.stock-name');
+      const name = nameEl ? nameEl.textContent.toLowerCase() : '';
+      const match = !q || ticker.includes(q) || name.includes(q);
+      item.style.display = match ? '' : 'none';
+      row.classList.toggle('filter-match', !!(q && match));
+      if (match) anyMatch = true;
+    });
+    if (q) {
+      section.style.display = anyMatch ? '' : 'none';
+      if (anyMatch) section.classList.remove('collapsed');
+    } else {
+      section.style.display = '';
+      section.classList.toggle('collapsed', collapsedCats.has(section.dataset.cat));
+    }
+  });
+}
+
+const filterInp = document.getElementById('filter-input');
+filterInp.addEventListener('input', () => {
+  filterQuery = filterInp.value.trim();
+  applyFilter();
+});
+filterInp.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    filterInp.value = '';
+    filterQuery = '';
+    applyFilter();
+    filterInp.blur();
+  }
+});
 
 // ---- search ----
 const inp = document.getElementById('search-input');
