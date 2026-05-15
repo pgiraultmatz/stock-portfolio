@@ -1288,13 +1288,10 @@ function copyStockData(ticker) {
 function copyReminderPrompt(btn) {
   const ticker = btn.dataset.reminderTicker;
   const name   = btn.dataset.reminderName;
-  const date   = btn.dataset.reminderDate; // ISO 2026-05-07
-  const d = new Date(...date.split('-').map((v, i) => i === 1 ? +v - 1 : +v));
-  const dateLabel = d.toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-  const prompt = `I need you to schedule a task related to the earnings release of ${name} (${ticker}).
+  const prompt = `I need you to schedule a task related to the upcoming earnings release of ${name} (${ticker}).
 
-1. Find the exact time of the ${ticker} earnings release scheduled on ${dateLabel}.
+1. Find the exact date and time of the next ${ticker} earnings release (check Yahoo Finance, Nasdaq, or another reliable source to confirm).
 2. Schedule a task to run exactly 1 minute after that time.
 3. At that moment, fetch the earnings results and determine whether they are positive or negative: check EPS (beat or miss vs. analyst consensus), revenue (beat or miss), and any guidance revision.
 4. Report a concise verdict: BEAT / MISS / IN-LINE, with the key figures.`;
