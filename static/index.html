@@ -709,6 +709,17 @@
     <div class="suggestions" id="suggestions"></div>
   </div>
   <input type="text" class="search-input" id="filter-input" placeholder="Filter ticker…" autocomplete="off" style="max-width:160px">
+  <select id="signal-filter" class="search-input" style="max-width:160px;cursor:pointer">
+    <option value="">All signals</option>
+    <option value="STRONG BUY">STRONG BUY</option>
+    <option value="BUY">BUY</option>
+    <option value="ACCUMULATE">ACCUMULATE</option>
+    <option value="HOLD">HOLD</option>
+    <option value="LIGHT TRIM">LIGHT TRIM</option>
+    <option value="TRIM">TRIM</option>
+    <option value="SELL">SELL</option>
+    <option value="STRONG SELL">STRONG SELL</option>
+  </select>
   <button id="save-btn" class="btn btn-export" onclick="saveToGist()" style="margin-left:auto">☁ Save</button>
 </div>
 </div><!-- /sticky-top-bar -->
@@ -1492,9 +1503,12 @@ function bindPortfolioEvents() {
 
 // ---- portfolio filter ----
 let filterQuery = '';
+let filterSignal = '';
 
 function applyFilter() {
   const q = filterQuery.toLowerCase();
+  const sig = filterSignal;
+  const active = q || sig;
   document.querySelectorAll('#portfolio .cat-section').forEach(section => {
     let anyMatch = false;
     section.querySelectorAll('.stock-item').forEach(item => {
@@ -1503,12 +1517,15 @@ function applyFilter() {
       const ticker = (row.dataset.ticker || '').toLowerCase();
       const nameEl = row.querySelector('.stock-name');
       const name = nameEl ? nameEl.textContent.toLowerCase() : '';
-      const match = !q || ticker.includes(q) || name.includes(q);
+      const textMatch = !q || ticker.includes(q) || name.includes(q);
+      const m = metrics[row.dataset.ticker] || {};
+      const sigMatch = !sig || (m.signal || '') === sig;
+      const match = textMatch && sigMatch;
       item.style.display = match ? '' : 'none';
-      row.classList.toggle('filter-match', !!(q && match));
+      row.classList.toggle('filter-match', !!(active && match));
       if (match) anyMatch = true;
     });
-    if (q) {
+    if (active) {
       section.style.display = anyMatch ? '' : 'none';
       if (anyMatch) section.classList.remove('collapsed');
     } else {
@@ -1530,6 +1547,12 @@ filterInp.addEventListener('keydown', e => {
     applyFilter();
     filterInp.blur();
   }
+});
+
+const signalFilterEl = document.getElementById('signal-filter');
+signalFilterEl.addEventListener('change', () => {
+  filterSignal = signalFilterEl.value;
+  applyFilter();
 });
 
 // ---- search ----
