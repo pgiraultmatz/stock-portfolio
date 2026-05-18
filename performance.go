@@ -203,7 +203,10 @@ func calcPerfPnL(txs []TRTransaction) MonthlyData {
 			}
 		case "SELL":
 			if isEtf || isCrypto {
-				net  := math.Abs(t.Amount) + t.Fee // Fee is negative in TR exports
+				net := math.Abs(t.Amount) + t.Fee // Fee is negative in TR exports
+				if net == 0 && t.Price > 0 {      // pending transaction (amount not yet settled)
+					break
+				}
 				cost := fifoConsume(sym, math.Abs(t.Shares))
 				pnl  := net - cost
 				cat  := "pv_etf_stock"
