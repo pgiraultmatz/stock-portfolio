@@ -2,6 +2,7 @@ portfolio-editor
 stock-portfolio
 .env
 .env.prod
+files/
 stock-portfolio-linux
 # Terraform state
 terraform/terraform.tfstate
