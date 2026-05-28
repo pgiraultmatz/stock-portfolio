@@ -49,8 +49,8 @@ type Category struct {
 
 type contextKey string
 
-const ctxUserID   contextKey = "userID"
-const ctxUser     contextKey = "user"
+const ctxUserID contextKey = "userID"
+const ctxUser contextKey = "user"
 
 type Server struct {
 	store         Store
@@ -488,8 +488,8 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 	type chartResp struct {
 		Chart struct {
 			Result []struct {
-				Meta      chartMeta `json:"meta"`
-				Timestamp []int64   `json:"timestamp"`
+				Meta       chartMeta `json:"meta"`
+				Timestamp  []int64   `json:"timestamp"`
 				Indicators struct {
 					Quote []struct {
 						Open []float64 `json:"open"`
@@ -678,6 +678,55 @@ func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
 	// Portfolio is persisted immediately on every write — nothing to do.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+// ── Apartment investment — filesystem storage ────────────────────────────────
+
+func apartmentDir() string {
+	return filepath.Join("files", "apartment")
+}
+
+func apartmentParamsPath() string {
+	return filepath.Join(apartmentDir(), "params.json")
+}
+
+func (s *Server) getApartmentParams(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(apartmentParamsPath())
+	if os.IsNotExist(err) {
+		data = []byte("{}")
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func (s *Server) putApartmentParams(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	data, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		http.Error(w, "invalid params", http.StatusBadRequest)
+		return
+	}
+	if err := os.MkdirAll(apartmentDir(), 0o755); err != nil {
+		http.Error(w, "mkdir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(apartmentParamsPath(), data, 0o644); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── Yuh — filesystem storage ─────────────────────────────────────────────────
@@ -1288,8 +1337,10 @@ func fetchYahooPrice(ctx context.Context, ticker string) (yahooQuote, bool) {
 	}
 	type chartResp struct {
 		Chart struct {
-			Result []struct{ Meta chartMeta `json:"meta"` } `json:"result"`
-			Error  *struct{ Code string }                   `json:"error"`
+			Result []struct {
+				Meta chartMeta `json:"meta"`
+			} `json:"result"`
+			Error *struct{ Code string } `json:"error"`
 		} `json:"chart"`
 	}
 	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(ticker) + "?range=1d&interval=1d"
@@ -1504,8 +1555,8 @@ func (s *Server) deletePerfTRYear(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := userIDFromCtx(r)
 	_ = os.Remove(perfTRCSVPath(userID, year))
-	_ = os.Remove(perfTRResultPath(userID))  // invalidate result cache
-	_ = os.Remove(perfTRPricesPath(userID))  // invalidate price cache
+	_ = os.Remove(perfTRResultPath(userID)) // invalidate result cache
+	_ = os.Remove(perfTRPricesPath(userID)) // invalidate price cache
 	resp, err := s.computeAndCachePerfTR(userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1570,7 +1621,10 @@ func (s *Server) routes() http.Handler {
 				exists = err == nil
 			} else {
 				f, err := staticFiles.Open("static" + r.URL.Path)
-				if err == nil { f.Close(); exists = true }
+				if err == nil {
+					f.Close()
+					exists = true
+				}
 			}
 			if exists {
 				fileServer.ServeHTTP(w, r)
@@ -1763,6 +1817,17 @@ func (s *Server) routes() http.Handler {
 			s.getPerfTR(w, r)
 		case http.MethodPost:
 			s.postPerfTR(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/apartment/params", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getApartmentParams(w, r)
+		case http.MethodPut:
+			s.putApartmentParams(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

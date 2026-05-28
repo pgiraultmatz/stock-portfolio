@@ -222,6 +222,50 @@
     .perf-pie-legend-pct { margin-left: auto; font-family: 'SF Mono', monospace; color: #c9d1d9; }
     .perf-section-title { font-size: 13px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #21262d; }
 
+    /* ---- apartment investment view ---- */
+    .apt-view { max-width: 1680px; margin: 0 auto; padding: 32px 20px; box-sizing: border-box; }
+    .apt-layout { display: flex; flex-direction: column; gap: 24px; }
+    .apt-row { display: grid; grid-template-columns: minmax(300px, 360px) minmax(980px, 1fr); gap: 20px; align-items: start; }
+    .apt-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+    .apt-panel-title { font-size: 13px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #21262d; }
+    .apt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .apt-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .apt-field label { font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; }
+    .apt-field input {
+      width: 100%; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d;
+      border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; font-family: 'SF Mono', monospace;
+    }
+    .apt-field input:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.16); }
+    .apt-field-full { grid-column: 1 / -1; }
+    .apt-config-section { margin-bottom: 20px; }
+    .apt-config-section:last-child { margin-bottom: 0; }
+    .apt-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+    .apt-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .apt-kpi { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 13px 14px; min-width: 0; }
+    .apt-kpi-label { font-size: 10px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .apt-kpi-value { font-family: 'SF Mono', monospace; font-size: 17px; font-weight: 700; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .apt-kpi-value.pos { color: #3fb950; }
+    .apt-kpi-value.neg { color: #f85149; }
+    .apt-table-wrap { overflow-x: auto; }
+    .apt-table { width: 100%; min-width: 1300px; border-collapse: collapse; font-size: 12.5px; }
+    .apt-table th { font-size: 10px; color: #484f58; text-transform: uppercase; letter-spacing: .06em; padding: 7px 10px; border-bottom: 1px solid #21262d; text-align: right; }
+    .apt-table th:first-child, .apt-table td:first-child { text-align: left; }
+    .apt-table td { padding: 8px 10px; border-bottom: 1px solid #161b22; text-align: right; font-family: 'SF Mono', monospace; }
+    .apt-table td:first-child { color: #8b949e; font-family: inherit; }
+    .apt-row-positive td { background: rgba(63,185,80,.07); }
+    .apt-row-negative td { background: rgba(248,81,73,.04); }
+    .apt-row-break-even td { border-top: 1px solid rgba(63,185,80,.55); border-bottom: 1px solid rgba(63,185,80,.55); }
+    .apt-row-break-even td:first-child { color: #3fb950; font-weight: 700; }
+    .apt-note { margin-top: 14px; color: #8b949e; font-size: 12px; line-height: 1.6; }
+    @media (max-width: 920px) {
+      .apt-row { grid-template-columns: 1fr; }
+      .apt-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .apt-view { padding: 24px 14px; }
+      .apt-grid, .apt-kpis { grid-template-columns: 1fr; }
+    }
+
     /* ---- add bar ---- */
     .add-bar {
       padding: 12px 24px;
@@ -696,6 +740,7 @@
   <button class="nav-tab active" onclick="switchView('stocks')">Stocks</button>
   <button class="nav-tab" onclick="switchView('calendar')">Calendar</button>
   <button class="nav-tab" onclick="switchView('performance')">Performance</button>
+  <button class="nav-tab" onclick="switchView('apartment')">Apartment</button>
   <button class="nav-tab" onclick="switchView('report')">Report</button>
 </nav>
 
@@ -777,6 +822,194 @@
 </div>
 </div><!-- /view-performance -->
 
+<div id="view-apartment" style="display:none">
+  <div class="apt-view">
+    <div class="apt-layout">
+      <div class="apt-row">
+        <div class="apt-panel">
+          <div class="apt-panel-title">Achat / occupation</div>
+          <div class="apt-grid">
+            <div class="apt-field">
+              <label>Surface Carrez m²</label>
+              <input type="number" id="apt-lmnp-carrez" min="0" step="0.01" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Balcon m²</label>
+              <input type="number" id="apt-lmnp-balcony" min="0" step="0.01" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Surface utile m²</label>
+              <input type="number" id="apt-lmnp-useful-surface" min="0" step="0.01" disabled>
+            </div>
+            <div class="apt-field">
+              <label>Valeur actuelle €/m²</label>
+              <input type="number" id="apt-current-price-sqm" min="0" step="100" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Cash initial</label>
+              <input type="number" id="apt-initial-cash" min="0" step="500" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Prêt initial</label>
+              <input type="number" id="apt-loan-amount" min="0" step="1000" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Taux annuel %</label>
+              <input type="number" id="apt-loan-rate" min="0" step="0.01" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Première mensualité</label>
+              <input type="month" id="apt-start-month" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Mensualité initiale</label>
+              <input type="number" id="apt-old-payment" min="0" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Assurance initiale</label>
+              <input type="number" id="apt-old-insurance" min="0" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Changement crédit</label>
+              <input type="month" id="apt-switch-month" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>CRD au changement</label>
+              <input type="number" id="apt-switch-balance" min="0" step="500" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Nouvelle mensualité</label>
+              <input type="number" id="apt-new-payment" min="0" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Nouvelle assurance</label>
+              <input type="number" id="apt-new-insurance" min="0" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Loyer équivalent initial</label>
+              <input type="number" id="apt-rent-monthly" min="0" step="50" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Hausse loyer % / an</label>
+              <input type="number" id="apt-rent-growth" min="0" step="0.1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Charges copro / mois</label>
+              <input type="number" id="apt-owner-costs" min="0" step="25" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Taxe foncière / an</label>
+              <input type="number" id="apt-property-tax" min="0" step="100" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Valorisation future % / an</label>
+              <input type="number" id="apt-appreciation" step="0.1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Horizon max années</label>
+              <input type="number" id="apt-horizon-years" min="1" step="1" data-apt-input>
+            </div>
+          </div>
+        </div>
+
+        <section class="apt-panel">
+          <div class="apt-kpis">
+            <div class="apt-kpi">
+              <div class="apt-kpi-label">Valeur actuelle</div>
+              <div class="apt-kpi-value" id="apt-kpi-payment">—</div>
+            </div>
+            <div class="apt-kpi">
+              <div class="apt-kpi-label">Avantage actuel</div>
+              <div class="apt-kpi-value" id="apt-kpi-owner-month">—</div>
+            </div>
+            <div class="apt-kpi">
+              <div class="apt-kpi-label">Écart point mort</div>
+              <div class="apt-kpi-value" id="apt-kpi-advantage">—</div>
+            </div>
+            <div class="apt-kpi">
+              <div class="apt-kpi-label">Point mort</div>
+              <div class="apt-kpi-value" id="apt-kpi-break-even">—</div>
+            </div>
+          </div>
+
+          <div class="apt-panel-title">Occupation timeline</div>
+          <div class="apt-table-wrap">
+            <table class="apt-table">
+              <thead><tr><th>Date</th><th>Loyer équiv.</th><th>Coût proprio/mois</th><th>Cash sorti</th><th>Économie loc.</th><th>Écart cash total</th><th>Equity</th><th>Avantage</th></tr></thead>
+              <tbody id="apt-result-rows"></tbody>
+            </table>
+          </div>
+          <div class="apt-note" id="apt-note"></div>
+        </section>
+      </div>
+
+      <div class="apt-row">
+        <div class="apt-panel">
+          <div class="apt-panel-title">Location après départ</div>
+          <div class="apt-grid">
+            <div class="apt-field">
+              <label>Date de départ</label>
+              <input type="month" id="apt-rental-start-month" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Loyer meublé CC</label>
+              <input type="number" id="apt-rental-rent" min="0" step="50" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Gestion + GLI %</label>
+              <input type="number" id="apt-rental-management-rate" min="0" step="0.1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Forfait agence / mois</label>
+              <input type="number" id="apt-rental-agency-flat" min="0" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>PNO / an</label>
+              <input type="number" id="apt-rental-pno" min="0" step="10" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Valeur LMNP totale</label>
+              <input type="number" id="apt-lmnp-value" min="0" step="1000" disabled>
+            </div>
+            <div class="apt-field">
+              <label>Part terrain %</label>
+              <input type="number" id="apt-lmnp-land-rate" min="0" max="100" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Amort. construction ans</label>
+              <input type="number" id="apt-lmnp-building-years" min="1" step="1" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>Amort. meubles / an</label>
+              <input type="number" id="apt-lmnp-furniture-amort" min="0" step="100" data-apt-input>
+            </div>
+            <div class="apt-field">
+              <label>TMI + PS %</label>
+              <input type="number" id="apt-lmnp-tax-rate" min="0" step="1" data-apt-input>
+            </div>
+        </div>
+        <div class="apt-actions">
+            <button class="btn btn-primary" id="apt-save-btn" onclick="saveApartmentInputs()">Save</button>
+            <button class="btn btn-ghost" onclick="resetApartmentInputs()">Reset</button>
+            <span id="apt-save-status" class="prompt-save-status"></span>
+          </div>
+        </div>
+
+        <section class="apt-panel">
+          <div class="apt-panel-title">Rental scenario after departure</div>
+          <div class="apt-table-wrap">
+            <table class="apt-table">
+              <thead><tr><th>Date</th><th>Loyer CC</th><th>Cash-flow cum.</th><th>Equity</th><th>Gain location</th><th>Résultat fiscal cum.</th><th>Impôt cum.</th><th>Avantage global</th></tr></thead>
+              <tbody id="apt-rental-rows"></tbody>
+            </table>
+          </div>
+          <div class="apt-note" id="apt-rental-note"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div><!-- /view-apartment -->
+
 <div id="view-report" style="display:none">
   <div class="report-view">
     <div class="report-hero">
@@ -816,6 +1049,7 @@ function switchView(view, push = true) {
   document.getElementById('view-stocks').style.display      = view === 'stocks'      ? '' : 'none';
   document.getElementById('view-calendar').style.display    = view === 'calendar'    ? '' : 'none';
   document.getElementById('view-performance').style.display = view === 'performance' ? '' : 'none';
+  document.getElementById('view-apartment').style.display   = view === 'apartment'   ? '' : 'none';
   document.getElementById('view-report').style.display      = view === 'report'      ? '' : 'none';
   document.getElementById('add-bar').style.display = view === 'stocks' ? '' : 'none';
   document.querySelectorAll('.nav-tab').forEach((t, i) => {
@@ -823,10 +1057,12 @@ function switchView(view, push = true) {
       (i === 0 && view === 'stocks') ||
       (i === 1 && view === 'calendar') ||
       (i === 2 && view === 'performance') ||
-      (i === 3 && view === 'report'));
+      (i === 3 && view === 'apartment') ||
+      (i === 4 && view === 'report'));
   });
   if (view === 'calendar') renderCalendar();
   if (view === 'performance') renderTrTab();
+  if (view === 'apartment') renderApartmentCalculator();
   if (push) history.pushState({ view }, '', '/' + view);
 }
 
@@ -2265,10 +2501,459 @@ document.getElementById('perf-yuh-input').addEventListener('change', function() 
 document.getElementById('perf-yuh-drop').addEventListener('click', function() {
   document.getElementById('perf-yuh-input').click();
 });
+
+// ---- Apartment investment calculator ----------------------------------------
+
+const APT_DEFAULTS = {
+  currentPriceSqm: 8500,
+  initialCash: 113894,
+  loanAmount: 407000,
+  loanRate: 1.13,
+  startMonth: '2021-11',
+  oldPayment: 1559.74,
+  oldInsurance: 50.32,
+  switchMonth: '2025-11',
+  switchBalance: 349872.60,
+  newPayment: 1440.11,
+  newInsurance: 48.42,
+  rentMonthly: 1600,
+  rentGrowth: 1.5,
+  ownerCosts: 250,
+  propertyTax: 600,
+  appreciation: 0,
+  horizonYears: 8,
+  rentalStartMonth: '2026-10',
+  rentalRent: 1700,
+  rentalManagementRate: 9,
+  rentalAgencyFlat: 10,
+  rentalPno: 120,
+  lmnpCarrez: 52.29,
+  lmnpBalcony: 2.72,
+  lmnpLandRate: 25,
+  lmnpBuildingYears: 35,
+  lmnpFurnitureAmort: 0,
+  lmnpTaxRate: 47.2,
+};
+const APT_FIELDS = [
+  ['currentPriceSqm', 'apt-current-price-sqm'],
+  ['initialCash', 'apt-initial-cash'],
+  ['loanAmount', 'apt-loan-amount'],
+  ['loanRate', 'apt-loan-rate'],
+  ['startMonth', 'apt-start-month'],
+  ['oldPayment', 'apt-old-payment'],
+  ['oldInsurance', 'apt-old-insurance'],
+  ['switchMonth', 'apt-switch-month'],
+  ['switchBalance', 'apt-switch-balance'],
+  ['newPayment', 'apt-new-payment'],
+  ['newInsurance', 'apt-new-insurance'],
+  ['rentMonthly', 'apt-rent-monthly'],
+  ['rentGrowth', 'apt-rent-growth'],
+  ['ownerCosts', 'apt-owner-costs'],
+  ['propertyTax', 'apt-property-tax'],
+  ['appreciation', 'apt-appreciation'],
+  ['horizonYears', 'apt-horizon-years'],
+  ['rentalStartMonth', 'apt-rental-start-month'],
+  ['rentalRent', 'apt-rental-rent'],
+  ['rentalManagementRate', 'apt-rental-management-rate'],
+  ['rentalAgencyFlat', 'apt-rental-agency-flat'],
+  ['rentalPno', 'apt-rental-pno'],
+  ['lmnpCarrez', 'apt-lmnp-carrez'],
+  ['lmnpBalcony', 'apt-lmnp-balcony'],
+  ['lmnpLandRate', 'apt-lmnp-land-rate'],
+  ['lmnpBuildingYears', 'apt-lmnp-building-years'],
+  ['lmnpFurnitureAmort', 'apt-lmnp-furniture-amort'],
+  ['lmnpTaxRate', 'apt-lmnp-tax-rate'],
+];
+let aptSavedParams = null;
+
+async function fetchApartmentParams() {
+  try {
+    const res = await fetch('/api/apartment/params');
+    aptSavedParams = res.ok ? await res.json() : {};
+  } catch(e) {
+    aptSavedParams = {};
+  }
+  applyApartmentParams(loadApartmentParams());
+  renderApartmentCalculator();
+}
+
+function loadApartmentParams() {
+  return { ...APT_DEFAULTS, ...(aptSavedParams || {}) };
+}
+
+function readApartmentParams() {
+  const p = {};
+  for (const [key, id] of APT_FIELDS) {
+    const el = document.getElementById(id);
+    if (el?.type === 'month') {
+      p[key] = el.value || APT_DEFAULTS[key];
+      continue;
+    }
+    const value = Number(String(el?.value || '').replace(',', '.'));
+    p[key] = Number.isFinite(value) ? value : 0;
+  }
+  p.horizonYears = Math.max(1, p.horizonYears);
+  return p;
+}
+
+function applyApartmentParams(params) {
+  for (const [key, id] of APT_FIELDS) {
+    const el = document.getElementById(id);
+    if (el) el.value = params[key] ?? 0;
+  }
+}
+
+async function saveApartmentInputs(silent = false) {
+  const params = readApartmentParams();
+  const btn = document.getElementById('apt-save-btn');
+  const status = document.getElementById('apt-save-status');
+  if (!silent) {
+    if (btn) btn.disabled = true;
+    if (status) { status.textContent = 'Saving…'; status.className = 'prompt-save-status saving'; }
+  }
+  const res = await fetch('/api/apartment/params', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    if (!silent) {
+      if (btn) btn.disabled = false;
+      if (status) { status.textContent = 'Save failed'; status.className = 'prompt-save-status err'; }
+      if (typeof showToast === 'function') showToast(`Save error: ${errText}`);
+    }
+    return;
+  }
+  aptSavedParams = params;
+  if (!silent) {
+    if (btn) btn.disabled = false;
+    if (status) { status.textContent = 'Saved'; status.className = 'prompt-save-status ok'; }
+    if (typeof showToast === 'function') showToast('Apartment parameters saved');
+    setTimeout(() => {
+      if (status) status.textContent = '';
+    }, 1500);
+  }
+}
+
+function resetApartmentInputs() {
+  applyApartmentParams(APT_DEFAULTS);
+  saveApartmentInputs(true);
+  renderApartmentCalculator();
+}
+
+function aptMoney(n) {
+  const sign = n < 0 ? '−' : '';
+  return sign + Math.abs(n).toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €';
+}
+
+function aptPct(n) {
+  if (!Number.isFinite(n)) return '—';
+  return (n >= 0 ? '+' : '') + n.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+}
+
+function aptLmnpUsefulSurface(params) {
+  return params.lmnpCarrez + params.lmnpBalcony * 0.5;
+}
+
+function aptLmnpValue(params) {
+  return aptLmnpUsefulSurface(params) * params.currentPriceSqm;
+}
+
+function updateLmnpDerivedFields(params) {
+  const useful = document.getElementById('apt-lmnp-useful-surface');
+  const value = document.getElementById('apt-lmnp-value');
+  if (useful) useful.value = aptLmnpUsefulSurface(params).toFixed(2);
+  if (value) value.value = Math.round(aptLmnpValue(params));
+}
+
+function parseAptMonth(value) {
+  const [year, month] = String(value || '').split('-').map(Number);
+  if (!year || !month) return new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  return new Date(year, month - 1, 1);
+}
+
+function addAptMonths(date, months) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function aptMonthsBetween(start, end) {
+  return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+}
+
+function formatAptMonth(date) {
+  return date.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' });
+}
+
+function computeApartmentTimeline(params) {
+  const start = parseAptMonth(params.startMonth);
+  const switchMonth = parseAptMonth(params.switchMonth);
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = addAptMonths(current, Math.round(params.horizonYears * 12));
+  const monthlyRate = params.loanRate / 100 / 12;
+  const monthlyOwnerCosts = params.ownerCosts + params.propertyTax / 12;
+  const currentValue = aptLmnpValue(params);
+  const switchIndex = Math.max(0, aptMonthsBetween(start, switchMonth));
+  const currentIndex = Math.max(0, aptMonthsBetween(start, current));
+  const endIndex = Math.max(currentIndex, aptMonthsBetween(start, end));
+
+  let cashPaid = params.initialCash;
+  let rentPaid = 0;
+  let ownerRecurringPaid = 0;
+  let loanBalance = params.loanAmount;
+  const rows = [];
+  let breakEven = null;
+
+  for (let i = 0; i <= endIndex; i++) {
+    const date = addAptMonths(start, i);
+    const isAfterSwitch = i >= switchIndex;
+    if (i === switchIndex && params.switchBalance > 0) {
+      loanBalance = params.switchBalance;
+    }
+
+    const payment = isAfterSwitch ? params.newPayment : params.oldPayment;
+    const insurance = isAfterSwitch ? params.newInsurance : params.oldInsurance;
+    let ownerMonthlyCost = monthlyOwnerCosts;
+    if (loanBalance > 0) {
+      const interest = loanBalance * monthlyRate;
+      const principal = Math.max(0, Math.min(payment - interest, loanBalance));
+      loanBalance = Math.max(0, loanBalance - principal);
+      ownerMonthlyCost += interest + principal + insurance;
+    }
+    ownerRecurringPaid += ownerMonthlyCost;
+    cashPaid = params.initialCash + ownerRecurringPaid;
+    const equivalentRent = params.rentMonthly * Math.pow(1 + params.rentGrowth / 100, Math.floor(i / 12));
+    rentPaid += equivalentRent;
+
+    const futureYears = Math.max(0, aptMonthsBetween(current, date) / 12);
+    const value = currentValue * Math.pow(1 + params.appreciation / 100, futureYears);
+    const equity = value - loanBalance;
+    const renterSavings = ownerRecurringPaid - rentPaid;
+    const totalCashGap = cashPaid - rentPaid;
+    const advantage = equity - totalCashGap;
+    const state = { date, equivalentRent, ownerMonthlyCost, cashPaid, rentPaid, renterSavings, totalCashGap, loanBalance, value, equity, advantage };
+    if (i >= currentIndex && !breakEven && advantage >= 0) {
+      breakEven = state;
+    }
+    if (i === currentIndex || i % 12 === 0 || (breakEven && breakEven.date.getTime() === date.getTime())) {
+      rows.push(state);
+    }
+  }
+
+  return { rows, breakEven, current: rows.find(r => r.date.getTime() === current.getTime()) || rows[0], currentValue };
+}
+
+function computeApartmentStateAt(params, targetIndex) {
+  const start = parseAptMonth(params.startMonth);
+  const switchMonth = parseAptMonth(params.switchMonth);
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthlyRate = params.loanRate / 100 / 12;
+  const monthlyOwnerCosts = params.ownerCosts + params.propertyTax / 12;
+  const currentValue = aptLmnpValue(params);
+  const switchIndex = Math.max(0, aptMonthsBetween(start, switchMonth));
+
+  let cashPaid = params.initialCash;
+  let rentPaid = 0;
+  let ownerRecurringPaid = 0;
+  let loanBalance = params.loanAmount;
+  let state = null;
+
+  for (let i = 0; i <= targetIndex; i++) {
+    const date = addAptMonths(start, i);
+    const isAfterSwitch = i >= switchIndex;
+    if (i === switchIndex && params.switchBalance > 0) {
+      loanBalance = params.switchBalance;
+    }
+    const payment = isAfterSwitch ? params.newPayment : params.oldPayment;
+    const insurance = isAfterSwitch ? params.newInsurance : params.oldInsurance;
+    let ownerMonthlyCost = monthlyOwnerCosts;
+    if (loanBalance > 0) {
+      const interest = loanBalance * monthlyRate;
+      const principal = Math.max(0, Math.min(payment - interest, loanBalance));
+      loanBalance = Math.max(0, loanBalance - principal);
+      ownerMonthlyCost += interest + principal + insurance;
+    }
+    ownerRecurringPaid += ownerMonthlyCost;
+    cashPaid = params.initialCash + ownerRecurringPaid;
+    const equivalentRent = params.rentMonthly * Math.pow(1 + params.rentGrowth / 100, Math.floor(i / 12));
+    rentPaid += equivalentRent;
+    const futureYears = Math.max(0, aptMonthsBetween(current, date) / 12);
+    const value = currentValue * Math.pow(1 + params.appreciation / 100, futureYears);
+    const equity = value - loanBalance;
+    const totalCashGap = cashPaid - rentPaid;
+    state = { date, value, equity, cashPaid, rentPaid, totalCashGap, advantage: equity - totalCashGap };
+  }
+  return state;
+}
+
+function computeRentalTimeline(params) {
+  const start = parseAptMonth(params.startMonth);
+  const switchMonth = parseAptMonth(params.switchMonth);
+  const rentalStart = parseAptMonth(params.rentalStartMonth);
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = addAptMonths(current, Math.round(params.horizonYears * 12));
+  const monthlyRate = params.loanRate / 100 / 12;
+  const currentValue = aptLmnpValue(params);
+  const switchIndex = Math.max(0, aptMonthsBetween(start, switchMonth));
+  const rentalStartIndex = Math.max(0, aptMonthsBetween(start, rentalStart));
+  const currentIndex = Math.max(0, aptMonthsBetween(start, current));
+  const endIndex = Math.max(currentIndex, aptMonthsBetween(start, end));
+  const lmnpValue = aptLmnpValue(params);
+  const buildingAmort = (lmnpValue * (1 - params.lmnpLandRate / 100)) / Math.max(1, params.lmnpBuildingYears);
+  const annualAmort = buildingAmort + params.lmnpFurnitureAmort;
+  const monthlyAmort = annualAmort / 12;
+
+  let loanBalance = params.loanAmount;
+  let rentalCashFlowCum = 0;
+  let fiscalCum = 0;
+  let taxCum = 0;
+  const rows = [];
+  let departureEquity = 0;
+  let departureOccupationAdvantage = 0;
+  let rentalBreakEven = null;
+
+  for (let i = 0; i <= endIndex; i++) {
+    const date = addAptMonths(start, i);
+    const isAfterSwitch = i >= switchIndex;
+    if (i === switchIndex && params.switchBalance > 0) {
+      loanBalance = params.switchBalance;
+    }
+
+    const payment = isAfterSwitch ? params.newPayment : params.oldPayment;
+    const insurance = isAfterSwitch ? params.newInsurance : params.oldInsurance;
+    let interest = 0;
+    let principal = 0;
+    if (loanBalance > 0) {
+      interest = loanBalance * monthlyRate;
+      principal = Math.max(0, Math.min(payment - interest, loanBalance));
+      loanBalance = Math.max(0, loanBalance - principal);
+    }
+
+    const value = currentValue * Math.pow(1 + params.appreciation / 100, Math.max(0, aptMonthsBetween(current, date) / 12));
+    const equity = value - loanBalance;
+
+    if (i === rentalStartIndex) {
+      const occupationState = computeApartmentStateAt(params, rentalStartIndex);
+      departureEquity = occupationState.equity;
+      departureOccupationAdvantage = occupationState.advantage;
+    }
+
+    if (i >= rentalStartIndex) {
+      const rentYears = Math.floor((i - rentalStartIndex) / 12);
+      const rent = params.rentalRent * Math.pow(1 + params.rentGrowth / 100, rentYears);
+      const management = rent * params.rentalManagementRate / 100;
+      const agencyFlat = params.rentalAgencyFlat;
+      const propertyTax = params.propertyTax / 12;
+      const pno = params.rentalPno / 12;
+      const cashDeductibleBeforeAmort = rent - params.ownerCosts - management - agencyFlat - propertyTax - interest - insurance - pno;
+      const fiscal = Math.max(0, cashDeductibleBeforeAmort - Math.min(Math.max(0, cashDeductibleBeforeAmort), monthlyAmort));
+      const tax = fiscal * params.lmnpTaxRate / 100;
+      const cashFlow = rent - management - agencyFlat - propertyTax - pno - interest - principal - insurance - params.ownerCosts - tax;
+
+      fiscalCum += fiscal;
+      taxCum += tax;
+      rentalCashFlowCum += cashFlow;
+    }
+
+    if (i >= rentalStartIndex && (i === rentalStartIndex || i === currentIndex || i % 12 === 0 || i === endIndex)) {
+      const rentalGain = equity - departureEquity + rentalCashFlowCum;
+      const globalAdvantage = departureOccupationAdvantage + rentalGain;
+      const state = {
+        date, rent: params.rentalRent * Math.pow(1 + params.rentGrowth / 100, Math.floor((i - rentalStartIndex) / 12)), rentalCashFlowCum, fiscal: fiscalCum,
+        tax: taxCum, loanBalance, value, equity, rentalGain, globalAdvantage,
+      };
+      if (!rentalBreakEven && globalAdvantage >= 0) {
+        rentalBreakEven = state;
+      }
+      rows.push({
+        ...state,
+      });
+    }
+  }
+
+  return { rows, annualAmort, buildingAmort, departureEquity, departureOccupationAdvantage, rentalBreakEven, current: rows.find(r => r.date.getTime() === current.getTime()) || rows[0] };
+}
+
+function setAptKpi(id, value, numeric) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = value;
+  el.classList.toggle('pos', typeof numeric === 'number' && numeric > 0);
+  el.classList.toggle('neg', typeof numeric === 'number' && numeric < 0);
+}
+
+function renderApartmentCalculator() {
+  const firstInput = document.getElementById('apt-lmnp-carrez');
+  if (!firstInput) return;
+  if (firstInput.value === '') applyApartmentParams(loadApartmentParams());
+
+  const params = readApartmentParams();
+  updateLmnpDerivedFields(params);
+  const timeline = computeApartmentTimeline(params);
+  const rentalTimeline = computeRentalTimeline(params);
+  const current = timeline.current;
+  const breakEvenLabel = timeline.breakEven ? formatAptMonth(timeline.breakEven.date) : `>${Math.round(params.horizonYears)} ans`;
+
+  setAptKpi('apt-kpi-payment', aptMoney(timeline.currentValue), null);
+  setAptKpi('apt-kpi-owner-month', aptMoney(current.advantage), current.advantage);
+  setAptKpi('apt-kpi-advantage', current.advantage >= 0 ? '0 €' : aptMoney(Math.abs(current.advantage)), -Math.abs(current.advantage));
+  setAptKpi('apt-kpi-break-even', breakEvenLabel, null);
+
+  document.getElementById('apt-result-rows').innerHTML = timeline.rows.map(row => {
+    const cls = row.advantage > 0 ? 'perf-mc-pos' : row.advantage < 0 ? 'perf-mc-neg' : 'perf-mc-zero';
+    const rowCls = [
+      row.advantage >= 0 ? 'apt-row-positive' : 'apt-row-negative',
+      timeline.breakEven && row.date.getTime() === timeline.breakEven.date.getTime() ? 'apt-row-break-even' : '',
+    ].join(' ');
+    const label = row.date.getTime() === current.date.getTime()
+      ? `${formatAptMonth(row.date)} · now`
+      : formatAptMonth(row.date);
+    return `<tr class="${rowCls}"><td>${label}</td><td>${aptMoney(row.equivalentRent)}</td><td>${aptMoney(row.ownerMonthlyCost)}</td><td>${aptMoney(row.cashPaid)}</td><td>${aptMoney(row.renterSavings)}</td><td>${aptMoney(row.totalCashGap)}</td><td>${aptMoney(row.equity)}</td><td class="${cls}">${aptMoney(row.advantage)}</td></tr>`;
+  }).join('');
+
+  const note = [
+    `Break-even definition: equity + avoided rent - owner cash paid.`,
+    `Économie loc. = cumul des coûts proprio mensuels (crédit + assurance + charges + taxe foncière mensualisée) - loyers équivalents payés.`,
+    `Écart cash total = cash initial + coûts proprio mensuels cumulés - loyers équivalents payés.`,
+    `Current value uses ${params.lmnpCarrez.toLocaleString('fr-FR')} m² Carrez + 50% × ${params.lmnpBalcony.toLocaleString('fr-FR')} m² balcony = ${aptLmnpUsefulSurface(params).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} m² useful surface, at ${aptMoney(params.currentPriceSqm)}/m².`,
+    `At the current month, the scenario is ${current.advantage >= 0 ? 'ahead by' : 'behind by'} ${aptMoney(Math.abs(current.advantage))}.`,
+    `This excludes resale costs, opportunity cost of invested cash, tax edge cases and future major repairs.`,
+  ];
+  document.getElementById('apt-note').textContent = note.join(' ');
+
+  document.getElementById('apt-rental-rows').innerHTML = rentalTimeline.rows.map(row => {
+    const cashCls = row.rentalCashFlowCum > 0 ? 'perf-mc-pos' : row.rentalCashFlowCum < 0 ? 'perf-mc-neg' : 'perf-mc-zero';
+    const globalCls = row.globalAdvantage > 0 ? 'perf-mc-pos' : row.globalAdvantage < 0 ? 'perf-mc-neg' : 'perf-mc-zero';
+    const rowCls = [
+      row.globalAdvantage >= 0 ? 'apt-row-positive' : 'apt-row-negative',
+      rentalTimeline.rentalBreakEven && row.date.getTime() === rentalTimeline.rentalBreakEven.date.getTime() ? 'apt-row-break-even' : '',
+    ].join(' ');
+    return `<tr class="${rowCls}"><td>${formatAptMonth(row.date)}</td><td>${aptMoney(row.rent)}</td><td class="${cashCls}">${aptMoney(row.rentalCashFlowCum)}</td><td>${aptMoney(row.equity)}</td><td>${aptMoney(row.rentalGain)}</td><td>${aptMoney(row.fiscal)}</td><td>${aptMoney(row.tax)}</td><td class="${globalCls}">${aptMoney(row.globalAdvantage)}</td></tr>`;
+  }).join('');
+
+  const rentalNote = [
+    `Rental starts in ${formatAptMonth(parseAptMonth(params.rentalStartMonth))}.`,
+    `Occupation advantage at departure is ${aptMoney(rentalTimeline.departureOccupationAdvantage)}; rental break-even is ${rentalTimeline.rentalBreakEven ? formatAptMonth(rentalTimeline.rentalBreakEven.date) : 'not reached in horizon'}.`,
+    `LMNP value uses ${params.lmnpCarrez.toLocaleString('fr-FR')} m² Carrez + 50% × ${params.lmnpBalcony.toLocaleString('fr-FR')} m² balcony = ${aptLmnpUsefulSurface(params).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} m² useful surface, at the current value of ${aptMoney(params.currentPriceSqm)}/m².`,
+    `LMNP amortization uses ${aptMoney(aptLmnpValue(params))} value, ${params.lmnpLandRate}% land, ${params.lmnpBuildingYears} years: ${aptMoney(rentalTimeline.buildingAmort)}/year construction amortization.`,
+    `Cash-flow includes rent, loan payment, borrower insurance, copro charges, property tax, PNO, management/GLI and estimated LMNP tax.`,
+  ];
+  document.getElementById('apt-rental-note').textContent = rentalNote.join(' ');
+}
+
+document.querySelectorAll('[data-apt-input]').forEach(input => {
+  input.addEventListener('input', renderApartmentCalculator);
+});
+fetchApartmentParams();
+
 switchView(
   location.pathname === '/report'       ? 'report'       :
   location.pathname === '/calendar'     ? 'calendar'     :
-  location.pathname === '/performance'  ? 'performance'  : 'stocks', false);
+  location.pathname === '/performance'  ? 'performance'  :
+  location.pathname === '/apartment'    ? 'apartment'    : 'stocks', false);
 if (location.pathname === '/performance' && location.hash) {
   const tab = location.hash.slice(1);
   if (['yuh', 'global'].includes(tab)) perfSwitchTab(tab);
