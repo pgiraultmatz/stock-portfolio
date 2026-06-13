@@ -3363,9 +3363,12 @@ function copyPortfolioForAI(btn) {
 function renderPortfolioSection(positions) {
   if (!positions || positions.length === 0) return '';
 
-  const totalValue = positions.reduce((s, p) => s + (p.hasPrice ? p.value : p.totalCost), 0);
+  const sortedPositions = positions.slice().sort((a, b) =>
+    (b.hasPrice ? b.value : b.totalCost) - (a.hasPrice ? a.value : a.totalCost)
+  );
+  const totalValue = sortedPositions.reduce((s, p) => s + (p.hasPrice ? p.value : p.totalCost), 0);
 
-  const slices = positions.slice(0, 10).map((p, i) => ({
+  const slices = sortedPositions.slice(0, 10).map((p, i) => ({
     label: isISIN(p.symbol) && p.name ? p.name : p.symbol,
     value: p.hasPrice ? p.value : p.totalCost,
     color: PIE_COLORS[i % PIE_COLORS.length],
@@ -3386,12 +3389,12 @@ function renderPortfolioSection(positions) {
     return sym + s;
   };
 
-  const pricedPositions = positions.filter(p => p.hasPrice);
+  const pricedPositions = sortedPositions.filter(p => p.hasPrice);
   const totalPnL   = pricedPositions.reduce((s, p) => s + p.pnl, 0);
   const totalCost  = pricedPositions.reduce((s, p) => s + p.totalCost, 0);
   const totalPnLPct = totalCost > 0 ? totalPnL / totalCost * 100 : 0;
 
-  const rowsHtml = positions.map((p, i) => {
+  const rowsHtml = sortedPositions.map((p, i) => {
     const color = PIE_COLORS[i % PIE_COLORS.length];
     const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;flex-shrink:0"></span>`;
     // Cost is always EUR (TR account); value/P&L are EUR (converted server-side).
