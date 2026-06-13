@@ -735,6 +735,12 @@ type PerfYuhResponse struct {
 	Files     []string        `json:"files"`
 	Positions []OpenPosition  `json:"positions"`
 	Years     []YuhYearRecord `json:"years"`
+	Cash      YuhCashSummary  `json:"cash"`
+}
+
+type YuhCashSummary struct {
+	Deposited float64 `json:"deposited"`
+	Withdrawn float64 `json:"withdrawn"`
 }
 
 func perfYuhDir(userID string) string {
@@ -755,11 +761,38 @@ func perfYuhPricesPath(userID string) string {
 	return filepath.Join(perfYuhDir(userID), "prices.json")
 }
 
+func perfYuhCashPath(userID string) string {
+	return filepath.Join(perfYuhDir(userID), "cash.json")
+}
+
+func loadYuhCash(userID string) YuhCashSummary {
+	var cash YuhCashSummary
+	data, err := os.ReadFile(perfYuhCashPath(userID))
+	if err == nil {
+		_ = json.Unmarshal(data, &cash)
+	}
+	return cash
+}
+
+func saveYuhCash(userID string, cash YuhCashSummary) error {
+	if cash.Deposited < 0 || cash.Withdrawn < 0 {
+		return fmt.Errorf("cash amounts must be positive")
+	}
+	if err := os.MkdirAll(perfYuhDir(userID), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cash, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(perfYuhCashPath(userID), data, 0o644)
+}
+
 func (s *Server) computeAndCacheYuh(userID string) (*PerfYuhResponse, error) {
 	dir := perfYuhDir(userID)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
-		return &PerfYuhResponse{}, nil
+		return &PerfYuhResponse{Cash: loadYuhCash(userID)}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -827,7 +860,7 @@ func (s *Server) computeAndCacheYuh(userID string) (*PerfYuhResponse, error) {
 	}
 
 	positions, yearRecords := calcYuhData(allTxs, fxByYearCur)
-	resp := &PerfYuhResponse{Files: fileNames, Positions: positions, Years: yearRecords}
+	resp := &PerfYuhResponse{Files: fileNames, Positions: positions, Years: yearRecords, Cash: loadYuhCash(userID)}
 	if data, err := json.Marshal(resp); err == nil {
 		_ = os.WriteFile(perfYuhResultPath(userID), data, 0o644)
 	}
@@ -851,6 +884,7 @@ func (s *Server) getYuh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	resp.Cash = loadYuhCash(userID)
 
 	if len(resp.Positions) > 0 {
 		syms := make([]string, len(resp.Positions))
@@ -924,6 +958,19 @@ func (s *Server) getYuh(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) putYuhCash(w http.ResponseWriter, r *http.Request) {
+	var body YuhCashSummary
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := saveYuhCash(userIDFromCtx(r), body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) postYuh(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 5<<20))
 	if err != nil {
@@ -973,6 +1020,130 @@ func (s *Server) deleteYuhFile(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(filepath.Join(perfYuhDir(userID), filename))
 	_ = os.Remove(perfYuhResultPath(userID))
 	resp, err := s.computeAndCacheYuh(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// ── Vinted — filesystem storage ──────────────────────────────────────────────
+
+type PerfVintedResponse struct {
+	Files        []string            `json:"files"`
+	Transactions []VintedTransaction `json:"transactions"`
+	Summary      VintedSummary       `json:"summary"`
+}
+
+func perfVintedDir(userID string) string {
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, userID)
+	return filepath.Join("files", "performance", safe, "vinted")
+}
+
+func computeVinted(userID string) (*PerfVintedResponse, error) {
+	dir := perfVintedDir(userID)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return &PerfVintedResponse{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var txs []VintedTransaction
+	var fileNames []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(strings.ToUpper(name), ".CSV") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", name, err)
+		}
+		parsed, err := parseVintedCSV(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", name, err)
+		}
+		for i := range parsed {
+			parsed[i].SourceFile = name
+		}
+		txs = append(txs, parsed...)
+		fileNames = append(fileNames, name)
+	}
+	sort.Strings(fileNames)
+	sort.SliceStable(txs, func(i, j int) bool {
+		if txs[i].Date == txs[j].Date {
+			if txs[i].Type == txs[j].Type && txs[i].SourceOrder != txs[j].SourceOrder {
+				return txs[i].SourceOrder < txs[j].SourceOrder
+			}
+			return txs[i].Item < txs[j].Item
+		}
+		return txs[i].Date > txs[j].Date
+	})
+	return &PerfVintedResponse{Files: fileNames, Transactions: txs, Summary: summarizeVinted(txs)}, nil
+}
+
+func (s *Server) getVinted(w http.ResponseWriter, r *http.Request) {
+	resp, err := computeVinted(userIDFromCtx(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) postVinted(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 5<<20))
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+	txs, err := parseVintedCSV(string(body))
+	if err != nil {
+		http.Error(w, "invalid CSV: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(txs) == 0 {
+		http.Error(w, "no transactions found", http.StatusBadRequest)
+		return
+	}
+
+	filename := fmt.Sprintf("vinted_%x.csv", fnv32(body))
+	userID := userIDFromCtx(r)
+	if err := os.MkdirAll(perfVintedDir(userID), 0o755); err != nil {
+		http.Error(w, "mkdir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(perfVintedDir(userID), filename), body, 0o644); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	resp, err := computeVinted(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) deleteVintedFile(w http.ResponseWriter, r *http.Request) {
+	filename := strings.TrimPrefix(r.URL.Path, "/api/performance/vinted/")
+	if filename == "" || strings.Contains(filename, "/") {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+	userID := userIDFromCtx(r)
+	_ = os.Remove(filepath.Join(perfVintedDir(userID), filename))
+	resp, err := computeVinted(userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1776,6 +1947,14 @@ func (s *Server) routes() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	protected.HandleFunc("/api/performance/yuh/cash", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			s.putYuhCash(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	protected.HandleFunc("/api/performance/yuh/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			s.deleteYuhFile(w, r)
@@ -1789,6 +1968,24 @@ func (s *Server) routes() http.Handler {
 			s.getYuh(w, r)
 		case http.MethodPost:
 			s.postYuh(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	protected.HandleFunc("/api/performance/vinted/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.deleteVintedFile(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	protected.HandleFunc("/api/performance/vinted", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getVinted(w, r)
+		case http.MethodPost:
+			s.postVinted(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

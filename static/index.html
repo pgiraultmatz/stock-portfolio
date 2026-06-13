@@ -205,6 +205,27 @@
     .perf-totals-row { display: flex; justify-content: space-between; align-items: baseline; }
     .perf-totals-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; }
     .perf-totals-val { font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 700; }
+    .perf-cash-panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px 16px; margin: 0 0 22px; }
+    .perf-cash-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: end; }
+    .perf-cash-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .perf-cash-field label { font-size: 10px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; }
+    .perf-cash-field input { width: 100%; box-sizing: border-box; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 12px; outline: none; font-family: 'SF Mono', monospace; }
+    .perf-cash-field input:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.16); }
+    .perf-cash-metric { min-width: 0; }
+    .perf-cash-label { font-size: 10px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .perf-cash-value { font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 700; color: #e6edf3; }
+    .perf-cash-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .perf-cash-save.dirty { background: #238636; border-color: #2ea043; color: #fff; }
+    .perf-cash-save.dirty:hover { background: #2ea043; border-color: #3fb950; }
+    .perf-cash-status { font-size: 12px; color: #8b949e; min-height: 16px; }
+    .perf-cash-status.ok { color: #3fb950; }
+    .perf-cash-status.err { color: #f85149; }
+    .perf-cash-note { margin-top: 10px; font-size: 11px; color: #6e7681; line-height: 1.5; }
+    .perf-vinted-table { width: 100%; table-layout: fixed; }
+    .perf-vinted-table th, .perf-vinted-table td { box-sizing: border-box; }
+    .perf-vinted-table .vinted-item { width: 68%; white-space: normal; overflow-wrap: anywhere; }
+    .perf-vinted-table .vinted-type { width: 16%; text-align: left; }
+    .perf-vinted-table .vinted-cash { width: 16%; }
     .perf-ai-rec-wrap { margin-top: 20px; }
     .perf-ai-rec-label { display: block; font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
     .perf-ai-rec-view { min-height: 80px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; color: #c9d1d9; font-size: 13px; line-height: 1.7; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; cursor: text; transition: border-color .15s; }
@@ -789,6 +810,7 @@
   <div class="perf-subtabs">
     <button class="perf-subtab active" onclick="perfSwitchTab('tr')">Trade Republic</button>
     <button class="perf-subtab" onclick="perfSwitchTab('yuh')">Yuh</button>
+    <button class="perf-subtab" onclick="perfSwitchTab('vinted')">Vinted</button>
     <button class="perf-subtab" onclick="perfSwitchTab('global')" disabled>Vue globale</button>
   </div>
 
@@ -818,6 +840,20 @@
     </div>
     <div id="perf-yuh-staged"></div>
     <div id="perf-yuh-content"></div>
+  </div>
+
+  <div id="perf-tab-vinted" style="display:none">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+      <div class="perf-tr-dropzone" id="perf-vinted-drop" style="flex:1;margin-bottom:0;cursor:pointer"
+           ondragover="vintedDragOver(event)" ondragleave="vintedDragLeave(event)" ondrop="vintedDrop(event)">
+        <input type="file" id="perf-vinted-input" accept=".csv" multiple style="display:none">
+        <span id="perf-vinted-drop-label">Select Vinted transaction CSV files</span>
+        <span style="color:#8b949e;font-size:12px;margin-left:8px">(.csv)</span>
+      </div>
+      <button id="perf-vinted-import-btn" class="btn btn-ghost" disabled onclick="vintedImportStaged()">Import</button>
+    </div>
+    <div id="perf-vinted-staged"></div>
+    <div id="perf-vinted-content"></div>
   </div>
 </div>
 </div><!-- /view-performance -->
@@ -2477,8 +2513,10 @@ initPortfolioClicks();
 // Declare perf state vars before any calls that may reference them
 let perfTrData = null;
 let perfYuhData = null;
+let perfVintedData = null;
 let stagedFiles = [];
 let yuhStagedFiles = [];
+let vintedStagedFiles = [];
 
 loadUser();
 load();
@@ -2500,6 +2538,13 @@ document.getElementById('perf-yuh-input').addEventListener('change', function() 
 });
 document.getElementById('perf-yuh-drop').addEventListener('click', function() {
   document.getElementById('perf-yuh-input').click();
+});
+document.getElementById('perf-vinted-input').addEventListener('change', function() {
+  if (this.files && this.files.length > 0) vintedStageFiles(this.files);
+  this.value = '';
+});
+document.getElementById('perf-vinted-drop').addEventListener('click', function() {
+  document.getElementById('perf-vinted-input').click();
 });
 
 // ---- Apartment investment calculator ----------------------------------------
@@ -2956,7 +3001,7 @@ switchView(
   location.pathname === '/apartment'    ? 'apartment'    : 'stocks', false);
 if (location.pathname === '/performance' && location.hash) {
   const tab = location.hash.slice(1);
-  if (['yuh', 'global'].includes(tab)) perfSwitchTab(tab);
+  if (['yuh', 'vinted', 'global'].includes(tab)) perfSwitchTab(tab);
 }
 
 // ---- Performance view --------------------------------------------------------
@@ -2980,11 +3025,13 @@ async function loadPerfData() {
 
 function perfSwitchTab(tab) {
   document.querySelectorAll('.perf-subtab').forEach((b, i) => {
-    b.classList.toggle('active', ['tr','yuh','global'][i] === tab);
+    b.classList.toggle('active', ['tr','yuh','vinted','global'][i] === tab);
   });
-  document.getElementById('perf-tab-tr').style.display  = tab === 'tr'  ? '' : 'none';
-  document.getElementById('perf-tab-yuh').style.display = tab === 'yuh' ? '' : 'none';
+  document.getElementById('perf-tab-tr').style.display     = tab === 'tr'     ? '' : 'none';
+  document.getElementById('perf-tab-yuh').style.display    = tab === 'yuh'    ? '' : 'none';
+  document.getElementById('perf-tab-vinted').style.display = tab === 'vinted' ? '' : 'none';
   if (tab === 'yuh' && perfYuhData === null) loadYuhData();
+  if (tab === 'vinted' && perfVintedData === null) loadVintedData();
   history.replaceState(null, '', location.pathname + (tab !== 'tr' ? '#' + tab : ''));
 }
 
@@ -3206,7 +3253,9 @@ function renderYuhTab() {
   }
   const files = perfYuhData.files || [];
   const positions = perfYuhData.positions || [];
-  if (!files.length && !positions.length) {
+  const cash = perfYuhData.cash || { deposited: 0, withdrawn: 0 };
+  const hasCash = Number(cash.deposited || 0) > 0 || Number(cash.withdrawn || 0) > 0;
+  if (!files.length && !positions.length && !hasCash) {
     el.innerHTML = `<div class="perf-empty">
       <div class="perf-empty-icon">📊</div>
       <div class="perf-empty-title">No data yet</div>
@@ -3228,7 +3277,52 @@ function renderYuhTab() {
     <textarea id="perf-yuh-ai-rec" class="perf-ai-rec" placeholder="Paste the AI analysis here…" style="display:none" oninput="saveYuhAIRec(this.value)" onblur="yuhAIRecStopEdit()">${aiRec}</textarea>
   </div>`;
   const yearsHtml = renderYuhYears(perfYuhData.years || []);
-  el.innerHTML = filesHtml + renderPortfolioSection(positions) + yearsHtml + aiRecHtml;
+  el.innerHTML = filesHtml + renderYuhCashSection(positions, cash) + renderPortfolioSection(positions) + yearsHtml + aiRecHtml;
+}
+
+function renderYuhCashSection(positions, cash) {
+  const deposited = Number(cash && cash.deposited) || 0;
+  const withdrawn = Number(cash && cash.withdrawn) || 0;
+  const portfolioValue = (positions || []).reduce((s, p) => s + (p.hasPrice ? p.value : p.totalCost), 0);
+  const netCash = deposited - withdrawn;
+  const totalReturn = portfolioValue + withdrawn - deposited;
+  const totalReturnPct = deposited > 0 ? totalReturn / deposited * 100 : 0;
+  const fmtCur = n => {
+    const s = Math.abs(n).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    return `${n < 0 ? '−' : ''}${s} €`;
+  };
+  const fmtSigned = n => {
+    const cls = n >= 0 ? 'perf-mc-pos' : 'perf-mc-neg';
+    return `<span class="${cls}">${n >= 0 ? '+' : '−'}${fmtCur(Math.abs(n))}</span>`;
+  };
+  const fmtPct = n => `<span class="${n >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${n >= 0 ? '+' : ''}${n.toFixed(2)}%</span>`;
+
+  return `<div class="perf-cash-panel">
+    <div class="perf-section-title" style="margin-bottom:12px;padding-bottom:8px">Cash movements</div>
+    <div class="perf-cash-grid">
+      <div class="perf-cash-field">
+        <label>Total sent to Yuh</label>
+        <input id="perf-yuh-cash-deposited" type="number" min="0" step="0.01" value="${deposited || ''}" oninput="updateYuhCashFromInputs()">
+      </div>
+      <div class="perf-cash-field">
+        <label>Total withdrawn</label>
+        <input id="perf-yuh-cash-withdrawn" type="number" min="0" step="0.01" value="${withdrawn || ''}" oninput="updateYuhCashFromInputs()">
+      </div>
+      <div class="perf-cash-metric">
+        <div class="perf-cash-label">Net cash in</div>
+        <div class="perf-cash-value" id="perf-yuh-net-cash">${fmtCur(netCash)}</div>
+      </div>
+      <div class="perf-cash-metric">
+        <div class="perf-cash-label">Global return</div>
+        <div class="perf-cash-value" id="perf-yuh-global-return">${fmtSigned(totalReturn)} <span style="font-size:11px">${deposited > 0 ? fmtPct(totalReturnPct) : ''}</span></div>
+      </div>
+    </div>
+    <div class="perf-cash-actions">
+      <button id="perf-yuh-cash-save" class="btn btn-ghost perf-cash-save" onclick="saveYuhCash()">Save</button>
+      <span id="perf-yuh-cash-status" class="perf-cash-status"></span>
+    </div>
+    <div class="perf-cash-note">Global return = current portfolio value + withdrawals − total sent to Yuh.</div>
+  </div>`;
 }
 
 function renderYuhYears(years) {
@@ -3268,6 +3362,177 @@ function renderYuhYears(years) {
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+// ─── Vinted ──────────────────────────────────────────────────────────────────
+
+async function loadVintedData() {
+  const el = document.getElementById('perf-vinted-content');
+  if (el) el.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Loading…</div></div>';
+  try {
+    const resp = await fetch('/api/performance/vinted');
+    perfVintedData = resp.ok ? await resp.json() : { files: [], transactions: [], summary: {} };
+  } catch(e) {
+    perfVintedData = { files: [], transactions: [], summary: {} };
+  }
+  renderVintedTab();
+}
+
+function vintedDragOver(e) {
+  e.preventDefault();
+  document.getElementById('perf-vinted-drop').classList.add('drag-over');
+}
+function vintedDragLeave(e) {
+  document.getElementById('perf-vinted-drop').classList.remove('drag-over');
+}
+function vintedDrop(e) {
+  e.preventDefault();
+  document.getElementById('perf-vinted-drop').classList.remove('drag-over');
+  vintedStageFiles(e.dataTransfer.files);
+}
+
+function vintedStageFiles(fileList) {
+  for (const f of fileList) {
+    if (!vintedStagedFiles.find(s => s.name === f.name && s.size === f.size)) {
+      vintedStagedFiles.push(f);
+    }
+  }
+  renderVintedStagedFiles();
+}
+
+function vintedRemoveStaged(idx) {
+  vintedStagedFiles.splice(idx, 1);
+  renderVintedStagedFiles();
+}
+
+function renderVintedStagedFiles() {
+  const btn   = document.getElementById('perf-vinted-import-btn');
+  const label = document.getElementById('perf-vinted-drop-label');
+  const el    = document.getElementById('perf-vinted-staged');
+  if (vintedStagedFiles.length === 0) {
+    btn.disabled = true;
+    btn.className = 'btn btn-ghost';
+    btn.textContent = 'Import';
+    label.textContent = 'Select Vinted transaction CSV files';
+    el.innerHTML = '';
+    return;
+  }
+  btn.disabled = false;
+  btn.className = 'btn btn-primary';
+  btn.textContent = 'Import';
+  label.textContent = vintedStagedFiles.map(f => f.name).join(', ');
+  el.innerHTML = vintedStagedFiles.map((f, i) =>
+    `<div class="perf-staged-file">
+       <span>${escapeHtml(f.name)}</span>
+       <button onclick="vintedRemoveStaged(${i})">✕</button>
+     </div>`
+  ).join('');
+}
+
+async function vintedImportStaged() {
+  const files = vintedStagedFiles.slice();
+  vintedStagedFiles = [];
+  renderVintedStagedFiles();
+  for (const f of files) {
+    try {
+      const text = await readFile(f);
+      const resp = await fetch('/api/performance/vinted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: text,
+      });
+      if (!resp.ok) { showToast(`Upload error: ${await resp.text()}`); continue; }
+    } catch(e) {
+      showToast(`Error: ${e.message}`);
+    }
+  }
+  const el = document.getElementById('perf-vinted-content');
+  if (el) el.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Refreshing data…</div></div>';
+  await loadVintedData();
+}
+
+async function vintedRemoveFile(filename) {
+  if (!confirm(`Delete ${filename}?`)) return;
+  try {
+    const resp = await fetch(`/api/performance/vinted/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (!resp.ok) { showToast(`Error: ${await resp.text()}`); return; }
+  } catch(e) {
+    showToast(`Error: ${e.message}`);
+    return;
+  }
+  await loadVintedData();
+}
+
+function renderVintedTab() {
+  const el = document.getElementById('perf-vinted-content');
+  if (!el) return;
+  if (perfVintedData === null) {
+    el.innerHTML = '<div class="perf-empty"><div class="perf-spinner"></div><div class="perf-empty-title">Loading…</div></div>';
+    return;
+  }
+  const files = perfVintedData.files || [];
+  const txs = perfVintedData.transactions || [];
+  const summary = perfVintedData.summary || {};
+  if (!files.length && !txs.length) {
+    el.innerHTML = `<div class="perf-empty">
+      <div class="perf-empty-icon">📊</div>
+      <div class="perf-empty-title">No Vinted data yet</div>
+      <div class="perf-empty-desc">Import your Vinted transaction CSV exports<br>to see purchases, sales and net cash flow.</div>
+    </div>`;
+    return;
+  }
+
+  const filesHtml = files.length ? `<div style="margin-bottom:16px">
+    ${files.map(f => `<div class="perf-staged-file">
+      <span style="color:#8b949e;font-size:12px">📄</span>
+      <span>${escapeHtml(f)}</span>
+      <button onclick='vintedRemoveFile(${JSON.stringify(f)})'>✕</button>
+    </div>`).join('')}
+  </div>` : '';
+
+  const summaryHtml = `<div class="perf-totals" style="margin-bottom:22px">
+    <div class="perf-totals-row"><span class="perf-totals-label">Sales</span><span class="perf-totals-val perf-mc-pos">${fmtVintedMoney(summary.sales || 0)}</span></div>
+    <div class="perf-totals-row"><span class="perf-totals-label">Purchases</span><span class="perf-totals-val perf-mc-neg">${fmtVintedMoney(summary.purchases || 0)}</span></div>
+    <div class="perf-totals-row"><span class="perf-totals-label">Net</span><span class="perf-totals-val">${fmtVintedSigned(summary.net || 0)}</span></div>
+    <div class="perf-totals-row"><span class="perf-totals-label">Transactions</span><span class="perf-totals-val">${Number(summary.count || txs.length).toLocaleString('fr-FR')}</span></div>
+  </div>`;
+
+  const rows = txs.map(tx => `<tr>
+    <td class="perf-rl vinted-item">${escapeHtml(tx.item || tx.description || '')}</td>
+    <td class="vinted-type">${escapeHtml(tx.type || '')}</td>
+    <td class="perf-mc vinted-cash">${fmtVintedSigned(vintedDisplayAmount(tx))}</td>
+  </tr>`).join('');
+  const tableHtml = `<div class="perf-section-title">Transactions</div>
+  <div class="perf-year-section">
+    <table class="perf-month-table perf-vinted-table">
+      <thead><tr>
+        <th class="perf-rl vinted-item">Item</th>
+        <th class="vinted-type">Type</th>
+        <th class="perf-mc vinted-cash">Cash flow</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+
+  el.innerHTML = filesHtml + summaryHtml + tableHtml;
+}
+
+function fmtVintedMoney(n) {
+  return `${Math.abs(n).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2})} €`;
+}
+
+function fmtVintedSigned(n) {
+  if (Math.abs(n) < 0.005) return '<span class="perf-mc-zero">—</span>';
+  const cls = n >= 0 ? 'perf-mc-pos' : 'perf-mc-neg';
+  return `<span class="${cls}">${n >= 0 ? '+' : '−'}${fmtVintedMoney(n)}</span>`;
+}
+
+function vintedDisplayAmount(tx) {
+  const cashFlow = Number(tx.amount || 0);
+  if (Math.abs(cashFlow) >= 0.005) return cashFlow;
+  const gross = Number(tx.grossAmount || 0);
+  if (Math.abs(gross) < 0.005) return 0;
+  return String(tx.type || '').toLowerCase().includes('purchase') ? -gross : gross;
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
@@ -3512,6 +3777,84 @@ function saveYuhAIRec(value) {
       body: JSON.stringify({ content: value }),
     });
   }, 800);
+}
+
+function yuhCashFmtCur(n) {
+  const s = Math.abs(n).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return `${n < 0 ? '−' : ''}${s} €`;
+}
+
+function yuhCashFmtSigned(n) {
+  const cls = n >= 0 ? 'perf-mc-pos' : 'perf-mc-neg';
+  return `<span class="${cls}">${n >= 0 ? '+' : '−'}${yuhCashFmtCur(Math.abs(n))}</span>`;
+}
+
+function yuhCashFmtPct(n) {
+  return `<span class="${n >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${n >= 0 ? '+' : ''}${n.toFixed(2)}%</span>`;
+}
+
+function updateYuhCashMetrics() {
+  if (!perfYuhData) return;
+  const cash = perfYuhData.cash || { deposited: 0, withdrawn: 0 };
+  const deposited = Number(cash.deposited) || 0;
+  const withdrawn = Number(cash.withdrawn) || 0;
+  const positions = perfYuhData.positions || [];
+  const portfolioValue = positions.reduce((s, p) => s + (p.hasPrice ? p.value : p.totalCost), 0);
+  const netCash = deposited - withdrawn;
+  const totalReturn = portfolioValue + withdrawn - deposited;
+  const totalReturnPct = deposited > 0 ? totalReturn / deposited * 100 : 0;
+
+  const netEl = document.getElementById('perf-yuh-net-cash');
+  if (netEl) netEl.innerHTML = yuhCashFmtCur(netCash);
+  const returnEl = document.getElementById('perf-yuh-global-return');
+  if (returnEl) {
+    returnEl.innerHTML = `${yuhCashFmtSigned(totalReturn)} <span style="font-size:11px">${deposited > 0 ? yuhCashFmtPct(totalReturnPct) : ''}</span>`;
+  }
+}
+
+function updateYuhCashFromInputs() {
+  const depositedEl = document.getElementById('perf-yuh-cash-deposited');
+  const withdrawnEl = document.getElementById('perf-yuh-cash-withdrawn');
+  const deposited = Math.max(0, parseFloat(depositedEl?.value || '0') || 0);
+  const withdrawn = Math.max(0, parseFloat(withdrawnEl?.value || '0') || 0);
+  if (!perfYuhData) perfYuhData = {};
+  perfYuhData.cash = { deposited, withdrawn };
+  updateYuhCashMetrics();
+  const saveBtn = document.getElementById('perf-yuh-cash-save');
+  if (saveBtn) saveBtn.classList.add('dirty');
+  const status = document.getElementById('perf-yuh-cash-status');
+  if (status) {
+    status.className = 'perf-cash-status';
+    status.textContent = 'Unsaved changes';
+  }
+}
+
+async function saveYuhCash() {
+  updateYuhCashFromInputs();
+  const status = document.getElementById('perf-yuh-cash-status');
+  if (status) {
+    status.className = 'perf-cash-status';
+    status.textContent = 'Saving…';
+  }
+  try {
+    const resp = await fetch('/api/performance/yuh/cash', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(perfYuhData.cash),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const saveBtn = document.getElementById('perf-yuh-cash-save');
+    if (saveBtn) saveBtn.classList.remove('dirty');
+    if (status) {
+      status.className = 'perf-cash-status ok';
+      status.textContent = 'Saved';
+    }
+  } catch (err) {
+    if (status) {
+      status.className = 'perf-cash-status err';
+      status.textContent = `Save failed${err && err.message ? `: ${err.message.trim()}` : ''}`;
+    }
+  }
 }
 
 let aiRecDebounce = null;

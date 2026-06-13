@@ -136,11 +136,11 @@ var perfCatNames = []string{
 
 // calcPerfPnL runs FIFO P&L over pre-sorted transactions and returns monthly aggregates.
 func calcPerfPnL(txs []TRTransaction) MonthlyData {
-	etfClasses    := map[string]bool{"FUND": true, "STOCK": true}
+	etfClasses := map[string]bool{"FUND": true, "STOCK": true}
 	cryptoClasses := map[string]bool{"CRYPTO": true}
 
 	type lot struct{ shares, unitCost float64 }
-	fifo   := map[string][]lot{}
+	fifo := map[string][]lot{}
 	result := MonthlyData{}
 
 	ensureYM := func(ym string) {
@@ -185,7 +185,7 @@ func calcPerfPnL(txs []TRTransaction) MonthlyData {
 			sym = t.Name
 		}
 		isCrypto := cryptoClasses[t.AssetClass]
-		isEtf    := etfClasses[t.AssetClass] ||
+		isEtf := etfClasses[t.AssetClass] ||
 			(!isCrypto && t.AssetClass == "" && (t.Type == "BUY" || t.Type == "SELL"))
 
 		switch t.Type {
@@ -208,8 +208,8 @@ func calcPerfPnL(txs []TRTransaction) MonthlyData {
 					break
 				}
 				cost := fifoConsume(sym, math.Abs(t.Shares))
-				pnl  := net - cost
-				cat  := "pv_etf_stock"
+				pnl := net - cost
+				cat := "pv_etf_stock"
 				if isCrypto {
 					cat = "pv_crypto"
 				}
@@ -248,7 +248,7 @@ func calcOpenPositions(txs []TRTransaction) []OpenPosition {
 	etfClasses := map[string]bool{"FUND": true, "STOCK": true}
 
 	type lot struct{ shares, unitCost float64 }
-	fifo  := map[string][]lot{}
+	fifo := map[string][]lot{}
 	names := map[string]string{}
 
 	for _, t := range txs {
@@ -465,13 +465,13 @@ type YuhYearRecord struct {
 // fxByYearCur maps "CHF:2024" → average EURCHF rate for 2024.
 func calcYuhData(txs []YuhTransaction, fxByYearCur map[string]float64) ([]OpenPosition, []YuhYearRecord) {
 	type lot struct{ shares, unitCostEUR float64 }
-	fifo  := map[string][]lot{}
+	fifo := map[string][]lot{}
 	names := map[string]string{}
 
-	investedByYear  := map[string]float64{}
-	realizedByYear  := map[string]float64{}
+	investedByYear := map[string]float64{}
+	realizedByYear := map[string]float64{}
 	dividendsByYear := map[string]float64{}
-	interestByYear  := map[string]float64{}
+	interestByYear := map[string]float64{}
 
 	toEUR := func(amount float64, cur, year string) float64 {
 		if cur == "" || cur == "EUR" {
@@ -566,10 +566,18 @@ func calcYuhData(txs []YuhTransaction, fxByYearCur map[string]float64) ([]OpenPo
 
 	// Build year records — union of keys from all maps.
 	allYears := map[string]struct{}{}
-	for y := range investedByYear  { allYears[y] = struct{}{} }
-	for y := range realizedByYear  { allYears[y] = struct{}{} }
-	for y := range dividendsByYear { allYears[y] = struct{}{} }
-	for y := range interestByYear  { allYears[y] = struct{}{} }
+	for y := range investedByYear {
+		allYears[y] = struct{}{}
+	}
+	for y := range realizedByYear {
+		allYears[y] = struct{}{}
+	}
+	for y := range dividendsByYear {
+		allYears[y] = struct{}{}
+	}
+	for y := range interestByYear {
+		allYears[y] = struct{}{}
+	}
 	var yearRecords []YuhYearRecord
 	for y := range allYears {
 		pnl := realizedByYear[y]
@@ -585,4 +593,200 @@ func calcYuhData(txs []YuhTransaction, fxByYearCur map[string]float64) ([]OpenPo
 		return yearRecords[i].Year < yearRecords[j].Year
 	})
 	return positions, yearRecords
+}
+
+// ── Vinted ───────────────────────────────────────────────────────────────────
+
+type VintedTransaction struct {
+	Date          string  `json:"date"`
+	TransactionID string  `json:"transactionId,omitempty"`
+	Type          string  `json:"type"`
+	Item          string  `json:"item"`
+	Amount        float64 `json:"amount"`
+	GrossAmount   float64 `json:"grossAmount"`
+	Currency      string  `json:"currency"`
+	Status        string  `json:"status,omitempty"`
+	Description   string  `json:"description,omitempty"`
+	Realized      bool    `json:"realized"`
+	SourceOrder   int     `json:"sourceOrder,omitempty"`
+	SourceFile    string  `json:"sourceFile,omitempty"`
+}
+
+type VintedSummary struct {
+	Sales     float64 `json:"sales"`
+	Purchases float64 `json:"purchases"`
+	Net       float64 `json:"net"`
+	Count     int     `json:"count"`
+}
+
+func parseVintedCSV(content string) ([]VintedTransaction, error) {
+	content = strings.TrimPrefix(content, "\xef\xbb\xbf")
+	firstLine := content
+	if idx := strings.IndexAny(content, "\r\n"); idx >= 0 {
+		firstLine = content[:idx]
+	}
+
+	r := csv.NewReader(strings.NewReader(content))
+	if strings.Count(firstLine, ";") > strings.Count(firstLine, ",") {
+		r.Comma = ';'
+	}
+	r.LazyQuotes = true
+	r.TrimLeadingSpace = true
+
+	records, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(records) < 2 {
+		return nil, nil
+	}
+
+	headers := make(map[string]int, len(records[0]))
+	for i, h := range records[0] {
+		headers[normalizeCSVHeader(h)] = i
+	}
+
+	get := func(row []string, names ...string) string {
+		for _, name := range names {
+			if idx, ok := headers[normalizeCSVHeader(name)]; ok && idx < len(row) {
+				return strings.TrimSpace(strings.Trim(row[idx], `"`))
+			}
+		}
+		return ""
+	}
+
+	var txs []VintedTransaction
+	for _, row := range records[1:] {
+		date := normalizeVintedDate(get(row, "date", "transaction date", "created at", "paid at"))
+		txID := get(row, "transaction id", "id")
+		txType := get(row, "type", "transaction type", "operation")
+		item := get(row, "item", "item title", "title", "name", "article", "product")
+		status := get(row, "status")
+		description := get(row, "source status", "description", "details", "comment")
+		currency := get(row, "currency", "devise")
+		grossAmount := parseMoney(get(row, "amount", "amount eur", "total", "price", "value"))
+		cashFlowText := get(row, "cash flow eur", "cash flow")
+		amountText := cashFlowText
+		if amountText == "" {
+			amountText = get(row, "amount", "amount eur", "total", "price", "net amount", "net", "value")
+		}
+		amount := parseMoney(amountText)
+		if cashFlowText == "" && strings.Contains(strings.ToLower(txType), "purchase") && amount > 0 {
+			amount = -amount
+		}
+		if currency == "" {
+			currency = detectCurrency(amountText)
+		}
+		realized := parseBoolDefault(get(row, "included in realized cashflow"), true)
+		sourceOrder, _ := strconv.Atoi(get(row, "source order"))
+
+		if date == "" && txID == "" && txType == "" && item == "" && amount == 0 && description == "" {
+			continue
+		}
+		txs = append(txs, VintedTransaction{
+			Date:          date,
+			TransactionID: txID,
+			Type:          txType,
+			Item:          item,
+			Amount:        amount,
+			GrossAmount:   grossAmount,
+			Currency:      currency,
+			Status:        status,
+			Description:   description,
+			Realized:      realized,
+			SourceOrder:   sourceOrder,
+		})
+	}
+
+	sort.SliceStable(txs, func(i, j int) bool {
+		if txs[i].Date == txs[j].Date {
+			if txs[i].Type == txs[j].Type && txs[i].SourceOrder != txs[j].SourceOrder {
+				return txs[i].SourceOrder < txs[j].SourceOrder
+			}
+			return txs[i].Item < txs[j].Item
+		}
+		return txs[i].Date > txs[j].Date
+	})
+	return txs, nil
+}
+
+func summarizeVinted(txs []VintedTransaction) VintedSummary {
+	var s VintedSummary
+	s.Count = len(txs)
+	for _, tx := range txs {
+		amount := vintedSummaryAmount(tx)
+		if math.Abs(amount) < 0.005 {
+			continue
+		}
+		kind := strings.ToLower(tx.Type + " " + tx.Description)
+		if amount > 0 || strings.Contains(kind, "sale") || strings.Contains(kind, "sold") || strings.Contains(kind, "vente") || strings.Contains(kind, "vendu") {
+			s.Sales += math.Abs(amount)
+		} else if amount < 0 || strings.Contains(kind, "purchase") || strings.Contains(kind, "buy") || strings.Contains(kind, "achat") {
+			s.Purchases += math.Abs(amount)
+		}
+		s.Net += amount
+	}
+	return s
+}
+
+func vintedSummaryAmount(tx VintedTransaction) float64 {
+	if !tx.Realized && math.Abs(tx.Amount) < 0.005 {
+		return 0
+	}
+	return tx.Amount
+}
+
+func normalizeCSVHeader(s string) string {
+	s = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(s, "\xef\xbb\xbf")))
+	s = strings.ReplaceAll(s, "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func normalizeVintedDate(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 10 && s[2] == '/' && s[5] == '/' {
+		return s[6:10] + "-" + s[3:5] + "-" + s[0:2]
+	}
+	if len(s) >= 10 {
+		return s[:10]
+	}
+	return s
+}
+
+func parseMoney(s string) float64 {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\u00a0", "")
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "€", "")
+	s = strings.ReplaceAll(s, "CHF", "")
+	s = strings.ReplaceAll(s, "EUR", "")
+	s = strings.ReplaceAll(s, "'", "")
+	s = strings.ReplaceAll(s, ",", ".")
+	v, _ := strconv.ParseFloat(s, 64)
+	return v
+}
+
+func parseBoolDefault(s string, def bool) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "true", "1", "yes", "y", "oui":
+		return true
+	case "false", "0", "no", "n", "non":
+		return false
+	default:
+		return def
+	}
+}
+
+func detectCurrency(s string) string {
+	up := strings.ToUpper(s)
+	switch {
+	case strings.Contains(up, "CHF"):
+		return "CHF"
+	case strings.Contains(up, "EUR"), strings.Contains(up, "€"):
+		return "EUR"
+	default:
+		return ""
+	}
 }
