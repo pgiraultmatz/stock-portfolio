@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -564,6 +565,451 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
+}
+
+type ChartCandle struct {
+	Time   int64   `json:"time"`
+	Open   float64 `json:"open"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Close  float64 `json:"close"`
+	Volume int64   `json:"volume"`
+}
+
+type ChartLinePoint struct {
+	Time  int64   `json:"time"`
+	Value float64 `json:"value"`
+}
+
+type ChartMACDPoint struct {
+	Time      int64   `json:"time"`
+	MACD      float64 `json:"macd"`
+	Signal    float64 `json:"signal"`
+	Histogram float64 `json:"histogram"`
+}
+
+type ChartResponse struct {
+	Symbol     string           `json:"symbol"`
+	Range      string           `json:"range"`
+	Interval   string           `json:"interval"`
+	Currency   string           `json:"currency"`
+	Candles    []ChartCandle    `json:"candles"`
+	RSI14      []ChartLinePoint `json:"rsi14"`
+	SMA50      []ChartLinePoint `json:"sma50"`
+	SMA100     []ChartLinePoint `json:"sma100"`
+	SMA200     []ChartLinePoint `json:"sma200"`
+	MACD       []ChartMACDPoint `json:"macd"`
+	Cached     bool             `json:"cached"`
+	Stale      bool             `json:"stale"`
+	UpdatedAt  time.Time        `json:"updatedAt"`
+	ValidUntil time.Time        `json:"validUntil"`
+}
+
+func chartCacheDir() string {
+	return filepath.Join("files", "charts")
+}
+
+func chartCachePath(symbol, rng, interval string) string {
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			return r
+		}
+		return '_'
+	}, strings.ToUpper(symbol))
+	return filepath.Join(chartCacheDir(), safe+"_"+rng+"_"+interval+".json")
+}
+
+func chartCacheTTL(rng, interval string) time.Duration {
+	if rng == "1d" || interval == "5m" || interval == "15m" {
+		return 10 * time.Minute
+	}
+	return 6 * time.Hour
+}
+
+func chartFetchRange(displayRange, interval string) string {
+	if interval == "1wk" {
+		switch displayRange {
+		case "1mo", "3mo", "6mo", "1y", "2y":
+			return "5y"
+		default:
+			return displayRange
+		}
+	}
+	switch displayRange {
+	case "1mo", "3mo", "6mo":
+		return "1y"
+	case "1y":
+		return "2y"
+	case "2y":
+		return "5y"
+	default:
+		return displayRange
+	}
+}
+
+func loadChartCache(path string, ttl time.Duration) (ChartResponse, bool) {
+	var cr ChartResponse
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return cr, false
+	}
+	if err := json.Unmarshal(data, &cr); err != nil {
+		return cr, false
+	}
+	cr.Cached = true
+	cr.Stale = time.Since(cr.UpdatedAt) > ttl
+	cr.ValidUntil = cr.UpdatedAt.Add(ttl)
+	if len(cr.RSI14) == 0 && len(cr.Candles) > 14 {
+		cr.RSI14 = calcRSI14(cr.Candles)
+	}
+	enrichChartIndicators(&cr)
+	return cr, true
+}
+
+func saveChartCache(path string, cr ChartResponse) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(cr, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o644)
+}
+
+func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
+	symbol := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("symbol")))
+	if symbol == "" {
+		symbol = "BTC-USD"
+	}
+	rng := strings.TrimSpace(r.URL.Query().Get("range"))
+	if rng == "" {
+		rng = "1y"
+	}
+	interval := strings.TrimSpace(r.URL.Query().Get("interval"))
+	if interval == "" {
+		interval = "1d"
+	}
+	allowedRanges := map[string]bool{"1mo": true, "3mo": true, "6mo": true, "1y": true, "2y": true, "5y": true, "max": true}
+	allowedIntervals := map[string]bool{"1d": true, "1wk": true}
+	if !allowedRanges[rng] || !allowedIntervals[interval] {
+		http.Error(w, "invalid range or interval", http.StatusBadRequest)
+		return
+	}
+
+	ttl := chartCacheTTL(rng, interval)
+	fetchRange := chartFetchRange(rng, interval)
+	cachePath := chartCachePath(symbol, fetchRange, interval)
+	if cached, ok := loadChartCache(cachePath, ttl); ok && !cached.Stale {
+		cached = trimChartResponse(cached, rng, interval)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cached)
+		return
+	}
+
+	cr, err := fetchYahooChart(r.Context(), symbol, fetchRange, interval)
+	if err != nil {
+		if cached, ok := loadChartCache(cachePath, ttl); ok {
+			cached.Stale = true
+			cached = trimChartResponse(cached, rng, interval)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	cr.Range = fetchRange
+	cr.Interval = interval
+	cr.UpdatedAt = time.Now()
+	cr.ValidUntil = cr.UpdatedAt.Add(ttl)
+	saveChartCache(cachePath, cr)
+	cr = trimChartResponse(cr, rng, interval)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cr)
+}
+
+func trimChartResponse(cr ChartResponse, displayRange, interval string) ChartResponse {
+	cr.Range = displayRange
+	cr.Interval = interval
+	if displayRange == "max" || len(cr.Candles) == 0 {
+		return cr
+	}
+	cutoff := chartRangeCutoff(cr.Candles[len(cr.Candles)-1].Time, displayRange)
+	filterCandles := func(candles []ChartCandle) []ChartCandle {
+		idx := sort.Search(len(candles), func(i int) bool { return candles[i].Time >= cutoff })
+		return candles[idx:]
+	}
+	filterLine := func(points []ChartLinePoint) []ChartLinePoint {
+		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
+		return points[idx:]
+	}
+	filterMACD := func(points []ChartMACDPoint) []ChartMACDPoint {
+		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
+		return points[idx:]
+	}
+	cr.Candles = filterCandles(cr.Candles)
+	cr.RSI14 = filterLine(cr.RSI14)
+	cr.SMA50 = filterLine(cr.SMA50)
+	cr.SMA100 = filterLine(cr.SMA100)
+	cr.SMA200 = filterLine(cr.SMA200)
+	cr.MACD = filterMACD(cr.MACD)
+	return cr
+}
+
+func chartRangeCutoff(lastTS int64, displayRange string) int64 {
+	last := time.Unix(lastTS, 0).UTC()
+	switch displayRange {
+	case "1mo":
+		return last.AddDate(0, -1, 0).Unix()
+	case "3mo":
+		return last.AddDate(0, -3, 0).Unix()
+	case "6mo":
+		return last.AddDate(0, -6, 0).Unix()
+	case "1y":
+		return last.AddDate(-1, 0, 0).Unix()
+	case "2y":
+		return last.AddDate(-2, 0, 0).Unix()
+	case "5y":
+		return last.AddDate(-5, 0, 0).Unix()
+	default:
+		return 0
+	}
+}
+
+func fetchYahooChart(ctx context.Context, symbol, rng, interval string) (ChartResponse, error) {
+	type chartResp struct {
+		Chart struct {
+			Result []struct {
+				Meta struct {
+					Symbol   string `json:"symbol"`
+					Currency string `json:"currency"`
+				} `json:"meta"`
+				Timestamp  []int64 `json:"timestamp"`
+				Indicators struct {
+					Quote []struct {
+						Open   []*float64 `json:"open"`
+						High   []*float64 `json:"high"`
+						Low    []*float64 `json:"low"`
+						Close  []*float64 `json:"close"`
+						Volume []*int64   `json:"volume"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+			Error *struct {
+				Code        string `json:"code"`
+				Description string `json:"description"`
+			} `json:"error"`
+		} `json:"chart"`
+	}
+
+	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(symbol) +
+		"?range=" + url.QueryEscape(rng) + "&interval=" + url.QueryEscape(interval)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return ChartResponse{}, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ChartResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ChartResponse{}, fmt.Errorf("yahoo returned %s", resp.Status)
+	}
+	var yr chartResp
+	if err := json.NewDecoder(resp.Body).Decode(&yr); err != nil {
+		return ChartResponse{}, err
+	}
+	if yr.Chart.Error != nil {
+		return ChartResponse{}, fmt.Errorf("yahoo error: %s", yr.Chart.Error.Description)
+	}
+	if len(yr.Chart.Result) == 0 || len(yr.Chart.Result[0].Indicators.Quote) == 0 {
+		return ChartResponse{}, fmt.Errorf("no chart data")
+	}
+	res := yr.Chart.Result[0]
+	q := res.Indicators.Quote[0]
+	var candles []ChartCandle
+	for i, ts := range res.Timestamp {
+		if i >= len(q.Open) || i >= len(q.High) || i >= len(q.Low) || i >= len(q.Close) {
+			continue
+		}
+		if q.Open[i] == nil || q.High[i] == nil || q.Low[i] == nil || q.Close[i] == nil {
+			continue
+		}
+		var volume int64
+		if i < len(q.Volume) && q.Volume[i] != nil {
+			volume = *q.Volume[i]
+		}
+		candles = append(candles, ChartCandle{
+			Time:   ts,
+			Open:   *q.Open[i],
+			High:   *q.High[i],
+			Low:    *q.Low[i],
+			Close:  *q.Close[i],
+			Volume: volume,
+		})
+	}
+	if len(candles) == 0 {
+		return ChartResponse{}, fmt.Errorf("no candles")
+	}
+	cr := ChartResponse{Symbol: res.Meta.Symbol, Currency: res.Meta.Currency, Candles: candles}
+	enrichChartIndicators(&cr)
+	return cr, nil
+}
+
+func enrichChartIndicators(cr *ChartResponse) {
+	if len(cr.Candles) == 0 {
+		return
+	}
+	if len(cr.RSI14) == 0 {
+		cr.RSI14 = calcRSI14(cr.Candles)
+	}
+	if len(cr.SMA50) == 0 {
+		cr.SMA50 = calcSMA(cr.Candles, 50)
+	}
+	if len(cr.SMA100) == 0 {
+		cr.SMA100 = calcSMA(cr.Candles, 100)
+	}
+	if len(cr.SMA200) == 0 {
+		cr.SMA200 = calcSMA(cr.Candles, 200)
+	}
+	if len(cr.MACD) == 0 {
+		cr.MACD = calcMACD(cr.Candles)
+	}
+}
+
+func calcRSI14(candles []ChartCandle) []ChartLinePoint {
+	const period = 14
+	if len(candles) <= period {
+		return nil
+	}
+	gains := make([]float64, len(candles))
+	losses := make([]float64, len(candles))
+	for i := 1; i < len(candles); i++ {
+		diff := candles[i].Close - candles[i-1].Close
+		if diff >= 0 {
+			gains[i] = diff
+		} else {
+			losses[i] = -diff
+		}
+	}
+
+	var avgGain, avgLoss float64
+	for i := 1; i <= period; i++ {
+		avgGain += gains[i]
+		avgLoss += losses[i]
+	}
+	avgGain /= period
+	avgLoss /= period
+
+	points := make([]ChartLinePoint, 0, len(candles)-period)
+	points = append(points, ChartLinePoint{Time: candles[period].Time, Value: rsiValue(avgGain, avgLoss)})
+	for i := period + 1; i < len(candles); i++ {
+		avgGain = (avgGain*float64(period-1) + gains[i]) / period
+		avgLoss = (avgLoss*float64(period-1) + losses[i]) / period
+		points = append(points, ChartLinePoint{Time: candles[i].Time, Value: rsiValue(avgGain, avgLoss)})
+	}
+	return points
+}
+
+func calcSMA(candles []ChartCandle, period int) []ChartLinePoint {
+	if period <= 0 || len(candles) < period {
+		return nil
+	}
+	points := make([]ChartLinePoint, 0, len(candles)-period+1)
+	var sum float64
+	for i, c := range candles {
+		sum += c.Close
+		if i >= period {
+			sum -= candles[i-period].Close
+		}
+		if i >= period-1 {
+			points = append(points, ChartLinePoint{Time: c.Time, Value: sum / float64(period)})
+		}
+	}
+	return points
+}
+
+func calcMACD(candles []ChartCandle) []ChartMACDPoint {
+	const fast = 12
+	const slow = 26
+	const signalPeriod = 9
+	if len(candles) < slow+signalPeriod-1 {
+		return nil
+	}
+	emaFast := calcEMA(candles, fast)
+	emaSlow := calcEMA(candles, slow)
+
+	type macdBase struct {
+		time  int64
+		value float64
+	}
+	var base []macdBase
+	for i := range candles {
+		if math.IsNaN(emaFast[i]) || math.IsNaN(emaSlow[i]) {
+			continue
+		}
+		base = append(base, macdBase{time: candles[i].Time, value: emaFast[i] - emaSlow[i]})
+	}
+	if len(base) < signalPeriod {
+		return nil
+	}
+
+	var sum float64
+	for i := 0; i < signalPeriod; i++ {
+		sum += base[i].value
+	}
+	signal := sum / signalPeriod
+	points := make([]ChartMACDPoint, 0, len(base)-signalPeriod+1)
+	for i := signalPeriod - 1; i < len(base); i++ {
+		if i > signalPeriod-1 {
+			k := 2.0 / float64(signalPeriod+1)
+			signal = base[i].value*k + signal*(1-k)
+		}
+		points = append(points, ChartMACDPoint{
+			Time:      base[i].time,
+			MACD:      base[i].value,
+			Signal:    signal,
+			Histogram: base[i].value - signal,
+		})
+	}
+	return points
+}
+
+func calcEMA(candles []ChartCandle, period int) []float64 {
+	values := make([]float64, len(candles))
+	for i := range values {
+		values[i] = math.NaN()
+	}
+	if period <= 0 || len(candles) < period {
+		return values
+	}
+	var sum float64
+	for i := 0; i < period; i++ {
+		sum += candles[i].Close
+	}
+	ema := sum / float64(period)
+	values[period-1] = ema
+	k := 2.0 / float64(period+1)
+	for i := period; i < len(candles); i++ {
+		ema = candles[i].Close*k + ema*(1-k)
+		values[i] = ema
+	}
+	return values
+}
+
+func rsiValue(avgGain, avgLoss float64) float64 {
+	if avgLoss == 0 {
+		if avgGain == 0 {
+			return 50
+		}
+		return 100
+	}
+	rs := avgGain / avgLoss
+	return 100 - (100 / (1 + rs))
 }
 
 func (s *Server) validateXHandle(w http.ResponseWriter, r *http.Request) {
@@ -1874,6 +2320,13 @@ func (s *Server) routes() http.Handler {
 	protected.HandleFunc("/api/quotes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.quotesYahoo(w, r)
+		}
+	})
+	protected.HandleFunc("/api/charts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.getChart(w, r)
+		} else {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 	protected.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
