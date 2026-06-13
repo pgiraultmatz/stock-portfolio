@@ -588,21 +588,48 @@ type ChartMACDPoint struct {
 	Histogram float64 `json:"histogram"`
 }
 
+type ChartPivot struct {
+	Time  int64   `json:"time"`
+	Kind  string  `json:"kind"`
+	Price float64 `json:"price"`
+	RSI   float64 `json:"rsi,omitempty"`
+}
+
+type ChartLevel struct {
+	Kind     string  `json:"kind"`
+	Price    float64 `json:"price"`
+	Strength int     `json:"strength"`
+	Touches  []int64 `json:"touches"`
+}
+
+type ChartDivergence struct {
+	Kind      string  `json:"kind"`
+	FromTime  int64   `json:"fromTime"`
+	ToTime    int64   `json:"toTime"`
+	FromPrice float64 `json:"fromPrice"`
+	ToPrice   float64 `json:"toPrice"`
+	FromRSI   float64 `json:"fromRsi"`
+	ToRSI     float64 `json:"toRsi"`
+}
+
 type ChartResponse struct {
-	Symbol     string           `json:"symbol"`
-	Range      string           `json:"range"`
-	Interval   string           `json:"interval"`
-	Currency   string           `json:"currency"`
-	Candles    []ChartCandle    `json:"candles"`
-	RSI14      []ChartLinePoint `json:"rsi14"`
-	SMA50      []ChartLinePoint `json:"sma50"`
-	SMA100     []ChartLinePoint `json:"sma100"`
-	SMA200     []ChartLinePoint `json:"sma200"`
-	MACD       []ChartMACDPoint `json:"macd"`
-	Cached     bool             `json:"cached"`
-	Stale      bool             `json:"stale"`
-	UpdatedAt  time.Time        `json:"updatedAt"`
-	ValidUntil time.Time        `json:"validUntil"`
+	Symbol      string            `json:"symbol"`
+	Range       string            `json:"range"`
+	Interval    string            `json:"interval"`
+	Currency    string            `json:"currency"`
+	Candles     []ChartCandle     `json:"candles"`
+	RSI14       []ChartLinePoint  `json:"rsi14"`
+	SMA50       []ChartLinePoint  `json:"sma50"`
+	SMA100      []ChartLinePoint  `json:"sma100"`
+	SMA200      []ChartLinePoint  `json:"sma200"`
+	MACD        []ChartMACDPoint  `json:"macd"`
+	Pivots      []ChartPivot      `json:"pivots"`
+	Levels      []ChartLevel      `json:"levels"`
+	Divergences []ChartDivergence `json:"divergences"`
+	Cached      bool              `json:"cached"`
+	Stale       bool              `json:"stale"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+	ValidUntil  time.Time         `json:"validUntil"`
 }
 
 func chartCacheDir() string {
@@ -748,12 +775,23 @@ func trimChartResponse(cr ChartResponse, displayRange, interval string) ChartRes
 		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
 		return points[idx:]
 	}
+	filterPivots := func(points []ChartPivot) []ChartPivot {
+		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
+		return points[idx:]
+	}
+	filterDivs := func(divs []ChartDivergence) []ChartDivergence {
+		idx := sort.Search(len(divs), func(i int) bool { return divs[i].ToTime >= cutoff })
+		return divs[idx:]
+	}
 	cr.Candles = filterCandles(cr.Candles)
 	cr.RSI14 = filterLine(cr.RSI14)
 	cr.SMA50 = filterLine(cr.SMA50)
 	cr.SMA100 = filterLine(cr.SMA100)
 	cr.SMA200 = filterLine(cr.SMA200)
 	cr.MACD = filterMACD(cr.MACD)
+	cr.Pivots = filterPivots(cr.Pivots)
+	cr.Levels = calcChartLevels(cr.Pivots)
+	cr.Divergences = filterDivs(cr.Divergences)
 	return cr
 }
 
@@ -879,6 +917,15 @@ func enrichChartIndicators(cr *ChartResponse) {
 	if len(cr.MACD) == 0 {
 		cr.MACD = calcMACD(cr.Candles)
 	}
+	if len(cr.Pivots) == 0 {
+		cr.Pivots = calcChartPivots(cr.Candles, cr.RSI14)
+	}
+	if len(cr.Levels) == 0 {
+		cr.Levels = calcChartLevels(cr.Pivots)
+	}
+	if len(cr.Divergences) == 0 {
+		cr.Divergences = calcRSIDivergences(cr.Pivots)
+	}
 }
 
 func calcRSI14(candles []ChartCandle) []ChartLinePoint {
@@ -999,6 +1046,137 @@ func calcEMA(candles []ChartCandle, period int) []float64 {
 		values[i] = ema
 	}
 	return values
+}
+
+func calcChartPivots(candles []ChartCandle, rsi []ChartLinePoint) []ChartPivot {
+	const left = 3
+	const right = 3
+	if len(candles) < left+right+1 {
+		return nil
+	}
+	rsiByTime := make(map[int64]float64, len(rsi))
+	for _, p := range rsi {
+		rsiByTime[p.Time] = p.Value
+	}
+	var pivots []ChartPivot
+	for i := left; i < len(candles)-right; i++ {
+		hi := candles[i].High
+		lo := candles[i].Low
+		isHigh := true
+		isLow := true
+		for j := i - left; j <= i+right; j++ {
+			if j == i {
+				continue
+			}
+			if candles[j].High >= hi {
+				isHigh = false
+			}
+			if candles[j].Low <= lo {
+				isLow = false
+			}
+		}
+		if isHigh {
+			pivots = append(pivots, ChartPivot{Time: candles[i].Time, Kind: "high", Price: hi, RSI: rsiByTime[candles[i].Time]})
+		}
+		if isLow {
+			pivots = append(pivots, ChartPivot{Time: candles[i].Time, Kind: "low", Price: lo, RSI: rsiByTime[candles[i].Time]})
+		}
+	}
+	sort.SliceStable(pivots, func(i, j int) bool { return pivots[i].Time < pivots[j].Time })
+	return pivots
+}
+
+func calcChartLevels(pivots []ChartPivot) []ChartLevel {
+	if len(pivots) == 0 {
+		return nil
+	}
+	var levels []ChartLevel
+	for _, kind := range []string{"support", "resistance"} {
+		var relevant []ChartPivot
+		pivotKind := "low"
+		if kind == "resistance" {
+			pivotKind = "high"
+		}
+		for _, p := range pivots {
+			if p.Kind == pivotKind {
+				relevant = append(relevant, p)
+			}
+		}
+		if len(relevant) == 0 {
+			continue
+		}
+		sort.Slice(relevant, func(i, j int) bool { return relevant[i].Price < relevant[j].Price })
+		tolerance := chartLevelTolerance(relevant)
+		for _, p := range relevant {
+			merged := false
+			for i := range levels {
+				if levels[i].Kind != kind {
+					continue
+				}
+				if math.Abs(levels[i].Price-p.Price) <= tolerance {
+					n := float64(levels[i].Strength)
+					levels[i].Price = (levels[i].Price*n + p.Price) / (n + 1)
+					levels[i].Strength++
+					levels[i].Touches = append(levels[i].Touches, p.Time)
+					merged = true
+					break
+				}
+			}
+			if !merged {
+				levels = append(levels, ChartLevel{Kind: kind, Price: p.Price, Strength: 1, Touches: []int64{p.Time}})
+			}
+		}
+	}
+	sort.Slice(levels, func(i, j int) bool {
+		if levels[i].Strength == levels[j].Strength {
+			return levels[i].Price < levels[j].Price
+		}
+		return levels[i].Strength > levels[j].Strength
+	})
+	if len(levels) > 8 {
+		levels = levels[:8]
+	}
+	sort.Slice(levels, func(i, j int) bool { return levels[i].Price < levels[j].Price })
+	return levels
+}
+
+func chartLevelTolerance(pivots []ChartPivot) float64 {
+	minP, maxP := pivots[0].Price, pivots[0].Price
+	for _, p := range pivots[1:] {
+		minP = math.Min(minP, p.Price)
+		maxP = math.Max(maxP, p.Price)
+	}
+	return math.Max((maxP-minP)*0.012, maxP*0.004)
+}
+
+func calcRSIDivergences(pivots []ChartPivot) []ChartDivergence {
+	var divs []ChartDivergence
+	lastLow := ChartPivot{}
+	lastHigh := ChartPivot{}
+	for _, p := range pivots {
+		if p.RSI == 0 {
+			continue
+		}
+		switch p.Kind {
+		case "low":
+			if lastLow.Time != 0 && p.Price < lastLow.Price && p.RSI > lastLow.RSI+2 {
+				divs = append(divs, ChartDivergence{
+					Kind: "bullish", FromTime: lastLow.Time, ToTime: p.Time,
+					FromPrice: lastLow.Price, ToPrice: p.Price, FromRSI: lastLow.RSI, ToRSI: p.RSI,
+				})
+			}
+			lastLow = p
+		case "high":
+			if lastHigh.Time != 0 && p.Price > lastHigh.Price && p.RSI < lastHigh.RSI-2 {
+				divs = append(divs, ChartDivergence{
+					Kind: "bearish", FromTime: lastHigh.Time, ToTime: p.Time,
+					FromPrice: lastHigh.Price, ToPrice: p.Price, FromRSI: lastHigh.RSI, ToRSI: p.RSI,
+				})
+			}
+			lastHigh = p
+		}
+	}
+	return divs
 }
 
 func rsiValue(avgGain, avgLoss float64) float64 {

@@ -495,7 +495,7 @@
     .charts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
     .charts-title { font-size: 16px; font-weight: 700; color: #e6edf3; }
     .charts-meta { font-size: 12px; color: #8b949e; }
-    .charts-canvas-wrap { position: relative; width: 100%; height: 650px; }
+    .charts-canvas-wrap { position: relative; width: 100%; height: 900px; }
     #charts-canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
     .charts-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #6e7681; font-size: 13px; text-align: center; pointer-events: none; }
     .charts-watchlist { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; position: sticky; top: 110px; max-height: calc(100vh - 132px); display: flex; flex-direction: column; }
@@ -522,7 +522,7 @@
     @media (max-width: 720px) {
       .charts-layout { grid-template-columns: 1fr; }
       .charts-toolbar { grid-template-columns: 1fr 1fr; }
-      .charts-canvas-wrap { height: 560px; }
+      .charts-canvas-wrap { height: 760px; }
       .charts-watchlist { position: static; max-height: none; }
     }
 
@@ -1473,10 +1473,10 @@ function drawChart(data) {
 
   const candles = data.candles;
   const pad = { left: 8, right: 72, top: 18, bottom: 34 };
-  const volumeH = 88;
-  const rsiH = 112;
-  const macdH = 112;
-  const panelGap = 20;
+  const volumeH = 96;
+  const rsiH = 126;
+  const macdH = 126;
+  const panelGap = 24;
   const chartW = w - pad.left - pad.right;
   const priceH = h - pad.top - pad.bottom - volumeH - rsiH - macdH - panelGap * 3;
   const volumeTop = pad.top + priceH + panelGap;
@@ -1505,6 +1505,7 @@ function drawChart(data) {
   }
 
   const bodyW = Math.max(2, Math.min(10, chartW / candles.length * 0.62));
+  drawChartLevels(ctx, data.levels || [], y, pad, w, priceH);
   candles.forEach((c, i) => {
     const xx = x(i);
     const color = c.close >= c.open ? '#3fb950' : '#f85149';
@@ -1525,6 +1526,7 @@ function drawChart(data) {
   drawMovingAverage(ctx, data.sma50 || [], indexByTime, x, y, '#58a6ff', 'SMA 50', pad.left, pad.top + 12);
   drawMovingAverage(ctx, data.sma100 || [], indexByTime, x, y, '#d29922', 'SMA 100', pad.left + 76, pad.top + 12);
   drawMovingAverage(ctx, data.sma200 || [], indexByTime, x, y, '#db61a2', 'SMA 200', pad.left + 160, pad.top + 12);
+  drawChartDivergences(ctx, data.divergences || [], indexByTime, x, y);
   drawVolumePanel(ctx, candles, x, bodyW, pad, w, volumeTop, volumeH);
   drawRSIPanel(ctx, data.rsi14 || [], candles, x, pad, w, rsiTop, rsiH);
   drawMACDPanel(ctx, data.macd || [], candles, x, bodyW, pad, w, macdTop, macdH);
@@ -1648,6 +1650,62 @@ function drawMovingAverage(ctx, points, indexByTime, x, y, color, label, labelX,
   ctx.textAlign = 'left';
   ctx.font = '11px SF Mono, monospace';
   ctx.fillText(label, labelX, labelY);
+}
+
+function drawChartLevels(ctx, levels, y, pad, w, priceH) {
+  if (!levels || levels.length === 0) return;
+  ctx.save();
+  ctx.font = '10px SF Mono, monospace';
+  ctx.setLineDash([6, 4]);
+  for (const lvl of levels) {
+    const yy = y(lvl.price);
+    if (yy < pad.top || yy > pad.top + priceH) continue;
+    const isSupport = lvl.kind === 'support';
+    ctx.strokeStyle = isSupport ? 'rgba(63,185,80,.55)' : 'rgba(248,81,73,.55)';
+    ctx.lineWidth = Math.min(2.2, 0.8 + Number(lvl.strength || 1) * 0.25);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, yy);
+    ctx.lineTo(w - pad.right, yy);
+    ctx.stroke();
+    const label = `${isSupport ? 'S' : 'R'}${lvl.strength || 1}`;
+    ctx.setLineDash([]);
+    ctx.fillStyle = isSupport ? '#3fb950' : '#f85149';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, pad.left + 4, yy - 4);
+    ctx.setLineDash([6, 4]);
+  }
+  ctx.restore();
+}
+
+function drawChartDivergences(ctx, divs, indexByTime, x, y) {
+  if (!divs || divs.length === 0) return;
+  ctx.save();
+  ctx.font = '10px SF Mono, monospace';
+  for (const d of divs) {
+    const fromIdx = indexByTime.get(d.fromTime);
+    const toIdx = indexByTime.get(d.toTime);
+    if (fromIdx == null || toIdx == null) continue;
+    const bullish = d.kind === 'bullish';
+    const color = bullish ? '#3fb950' : '#f85149';
+    const x1 = x(fromIdx);
+    const x2 = x(toIdx);
+    const y1 = y(d.fromPrice);
+    const y2 = y(d.toPrice);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(x1, y1, 3, 0, Math.PI * 2);
+    ctx.arc(x2, y2, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawVolumePanel(ctx, candles, x, bodyW, pad, w, top, height) {
