@@ -612,6 +612,38 @@ type ChartDivergence struct {
 	ToRSI     float64 `json:"toRsi"`
 }
 
+type ChartChannel struct {
+	Kind           string  `json:"kind"`
+	SupportStart   int64   `json:"supportStart"`
+	SupportEnd     int64   `json:"supportEnd"`
+	SupportStartPx float64 `json:"supportStartPrice"`
+	SupportEndPx   float64 `json:"supportEndPrice"`
+	ResStart       int64   `json:"resistanceStart"`
+	ResEnd         int64   `json:"resistanceEnd"`
+	ResStartPx     float64 `json:"resistanceStartPrice"`
+	ResEndPx       float64 `json:"resistanceEndPrice"`
+	Slope          float64 `json:"slope"`
+	Touches        int     `json:"touches"`
+}
+
+type ChartSetup struct {
+	Kind              string  `json:"kind"`
+	Title             string  `json:"title"`
+	Bias              string  `json:"bias"`
+	Confidence        string  `json:"confidence"`
+	Detail            string  `json:"detail"`
+	TriggerPrice      float64 `json:"triggerPrice,omitempty"`
+	InvalidationPrice float64 `json:"invalidationPrice,omitempty"`
+	PositiveOutcome   string  `json:"positiveOutcome"`
+	NegativeOutcome   string  `json:"negativeOutcome"`
+}
+
+type ChartAnalysis struct {
+	Bias    string       `json:"bias"`
+	Summary string       `json:"summary"`
+	Setups  []ChartSetup `json:"setups"`
+}
+
 type ChartResponse struct {
 	Symbol      string            `json:"symbol"`
 	Range       string            `json:"range"`
@@ -626,6 +658,8 @@ type ChartResponse struct {
 	Pivots      []ChartPivot      `json:"pivots"`
 	Levels      []ChartLevel      `json:"levels"`
 	Divergences []ChartDivergence `json:"divergences"`
+	Channels    []ChartChannel    `json:"channels"`
+	Analysis    ChartAnalysis     `json:"analysis"`
 	Cached      bool              `json:"cached"`
 	Stale       bool              `json:"stale"`
 	UpdatedAt   time.Time         `json:"updatedAt"`
@@ -779,10 +813,6 @@ func trimChartResponse(cr ChartResponse, displayRange, interval string) ChartRes
 		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
 		return points[idx:]
 	}
-	filterDivs := func(divs []ChartDivergence) []ChartDivergence {
-		idx := sort.Search(len(divs), func(i int) bool { return divs[i].ToTime >= cutoff })
-		return divs[idx:]
-	}
 	cr.Candles = filterCandles(cr.Candles)
 	cr.RSI14 = filterLine(cr.RSI14)
 	cr.SMA50 = filterLine(cr.SMA50)
@@ -791,7 +821,10 @@ func trimChartResponse(cr ChartResponse, displayRange, interval string) ChartRes
 	cr.MACD = filterMACD(cr.MACD)
 	cr.Pivots = filterPivots(cr.Pivots)
 	cr.Levels = calcChartLevels(cr.Pivots)
-	cr.Divergences = filterDivs(cr.Divergences)
+	cr.Divergences = calcRSIDivergences(cr.Candles, cr.Pivots)
+	cr.Divergences = filterDivergencesByContext(cr.Divergences, cr.Candles, cr.SMA50, cr.SMA100, cr.SMA200, cr.Levels)
+	cr.Channels = calcChartChannels(cr.Candles, cr.Pivots)
+	cr.Analysis = calcChartAnalysis(cr)
 	return cr
 }
 
@@ -923,9 +956,12 @@ func enrichChartIndicators(cr *ChartResponse) {
 	if len(cr.Levels) == 0 {
 		cr.Levels = calcChartLevels(cr.Pivots)
 	}
-	if len(cr.Divergences) == 0 {
-		cr.Divergences = calcRSIDivergences(cr.Pivots)
+	cr.Divergences = calcRSIDivergences(cr.Candles, cr.Pivots)
+	cr.Divergences = filterDivergencesByContext(cr.Divergences, cr.Candles, cr.SMA50, cr.SMA100, cr.SMA200, cr.Levels)
+	if len(cr.Channels) == 0 {
+		cr.Channels = calcChartChannels(cr.Candles, cr.Pivots)
 	}
+	cr.Analysis = calcChartAnalysis(*cr)
 }
 
 func calcRSI14(candles []ChartCandle) []ChartLinePoint {
@@ -1149,7 +1185,7 @@ func chartLevelTolerance(pivots []ChartPivot) float64 {
 	return math.Max((maxP-minP)*0.012, maxP*0.004)
 }
 
-func calcRSIDivergences(pivots []ChartPivot) []ChartDivergence {
+func calcRSIDivergences(candles []ChartCandle, pivots []ChartPivot) []ChartDivergence {
 	var divs []ChartDivergence
 	lastLow := ChartPivot{}
 	lastHigh := ChartPivot{}
@@ -1159,7 +1195,7 @@ func calcRSIDivergences(pivots []ChartPivot) []ChartDivergence {
 		}
 		switch p.Kind {
 		case "low":
-			if lastLow.Time != 0 && p.Price < lastLow.Price && p.RSI > lastLow.RSI+2 {
+			if lastLow.Time != 0 && p.Price < lastLow.Price && p.RSI > lastLow.RSI+2 && divergenceSameSwing(candles, lastLow, p, "bullish") {
 				divs = append(divs, ChartDivergence{
 					Kind: "bullish", FromTime: lastLow.Time, ToTime: p.Time,
 					FromPrice: lastLow.Price, ToPrice: p.Price, FromRSI: lastLow.RSI, ToRSI: p.RSI,
@@ -1167,7 +1203,7 @@ func calcRSIDivergences(pivots []ChartPivot) []ChartDivergence {
 			}
 			lastLow = p
 		case "high":
-			if lastHigh.Time != 0 && p.Price > lastHigh.Price && p.RSI < lastHigh.RSI-2 {
+			if lastHigh.Time != 0 && p.Price > lastHigh.Price && p.RSI < lastHigh.RSI-2 && divergenceSameSwing(candles, lastHigh, p, "bearish") {
 				divs = append(divs, ChartDivergence{
 					Kind: "bearish", FromTime: lastHigh.Time, ToTime: p.Time,
 					FromPrice: lastHigh.Price, ToPrice: p.Price, FromRSI: lastHigh.RSI, ToRSI: p.RSI,
@@ -1177,6 +1213,678 @@ func calcRSIDivergences(pivots []ChartPivot) []ChartDivergence {
 		}
 	}
 	return divs
+}
+
+func divergenceSameSwing(candles []ChartCandle, from, to ChartPivot, kind string) bool {
+	if len(candles) == 0 || from.Time == 0 || to.Time == 0 || to.Time <= from.Time {
+		return true
+	}
+	const maxSwingCandles = 70
+	count := 0
+	maxHigh := math.Max(from.Price, to.Price)
+	minLow := math.Min(from.Price, to.Price)
+	for _, c := range candles {
+		if c.Time < from.Time || c.Time > to.Time {
+			continue
+		}
+		count++
+		maxHigh = math.Max(maxHigh, c.High)
+		minLow = math.Min(minLow, c.Low)
+	}
+	if count == 0 {
+		return true
+	}
+	if count > maxSwingCandles {
+		return false
+	}
+	switch kind {
+	case "bullish":
+		base := math.Max(from.Price, to.Price)
+		return base > 0 && maxHigh <= base*1.35
+	case "bearish":
+		base := math.Min(from.Price, to.Price)
+		return base > 0 && minLow >= base*0.65
+	default:
+		return true
+	}
+}
+
+func filterDivergencesByContext(divs []ChartDivergence, candles []ChartCandle, sma50, sma100, sma200 []ChartLinePoint, levels []ChartLevel) []ChartDivergence {
+	if len(divs) == 0 {
+		return nil
+	}
+	out := make([]ChartDivergence, 0, len(divs))
+	for _, div := range divs {
+		if div.Kind == "bullish" && divergenceOverlapsMASupportBounce(div, candles, sma50, sma100, sma200, levels) {
+			continue
+		}
+		out = append(out, div)
+	}
+	return out
+}
+
+func divergenceOverlapsMASupportBounce(div ChartDivergence, candles []ChartCandle, sma50, sma100, sma200 []ChartLinePoint, levels []ChartLevel) bool {
+	pivotCandle, ok := chartCandleAtOrAfter(candles, div.ToTime)
+	if !ok || div.ToPrice <= 0 {
+		return false
+	}
+	nearMA := priceNearLineAt(sma50, div.ToTime, div.ToPrice, 0.08) ||
+		priceNearLineAt(sma100, div.ToTime, div.ToPrice, 0.08) ||
+		priceNearLineAt(sma200, div.ToTime, div.ToPrice, 0.08)
+	nearSupport := priceNearSupport(levels, div.ToPrice, 0.06)
+	if !nearMA && !nearSupport {
+		return false
+	}
+	recovered := pivotCandle.Close > pivotCandle.Open
+	for _, c := range candles {
+		if c.Time <= div.ToTime {
+			continue
+		}
+		if c.Time > div.ToTime+int64(14*24*time.Hour/time.Second) {
+			break
+		}
+		if c.Close >= div.ToPrice*1.08 || priceAboveLineAt(sma50, c.Time, c.Close, 0.01) {
+			recovered = true
+			break
+		}
+	}
+	return recovered
+}
+
+func chartCandleAtOrAfter(candles []ChartCandle, ts int64) (ChartCandle, bool) {
+	for _, c := range candles {
+		if c.Time >= ts {
+			return c, true
+		}
+	}
+	return ChartCandle{}, false
+}
+
+func priceNearLineAt(points []ChartLinePoint, ts int64, price, tolerance float64) bool {
+	value, ok := chartLineValueAtOrBefore(points, ts)
+	return ok && value > 0 && math.Abs(price-value)/value <= tolerance
+}
+
+func priceAboveLineAt(points []ChartLinePoint, ts int64, price, tolerance float64) bool {
+	value, ok := chartLineValueAtOrBefore(points, ts)
+	return ok && value > 0 && price >= value*(1-tolerance)
+}
+
+func chartLineValueAtOrBefore(points []ChartLinePoint, ts int64) (float64, bool) {
+	idx := sort.Search(len(points), func(i int) bool { return points[i].Time > ts }) - 1
+	if idx < 0 {
+		return 0, false
+	}
+	return points[idx].Value, true
+}
+
+func priceNearSupport(levels []ChartLevel, price, tolerance float64) bool {
+	if price <= 0 {
+		return false
+	}
+	for _, lvl := range levels {
+		if lvl.Kind == "support" && lvl.Price > 0 && math.Abs(price-lvl.Price)/price <= tolerance {
+			return true
+		}
+	}
+	return false
+}
+
+func calcChartChannels(candles []ChartCandle, pivots []ChartPivot) []ChartChannel {
+	var lows, highs []ChartPivot
+	for _, p := range pivots {
+		switch p.Kind {
+		case "low":
+			lows = append(lows, p)
+		case "high":
+			highs = append(highs, p)
+		}
+	}
+	if len(lows) < 2 || len(highs) < 2 {
+		return nil
+	}
+
+	var best *ChartChannel
+	for li := maxInt(0, len(lows)-12); li < len(lows)-1; li++ {
+		for lj := li + 1; lj < len(lows); lj++ {
+			if lows[lj].Time == lows[li].Time {
+				continue
+			}
+			window := chartChannelWindow(candles, lows[li].Time, lows[lj].Time)
+			if len(window) < 20 {
+				continue
+			}
+			avgPrice := chartAvgClose(window)
+			if avgPrice == 0 {
+				continue
+			}
+			slope := chartSlope(lows[li], lows[lj])
+			tol := math.Max(avgPrice*0.018, 0.000001)
+
+			offset := 0.0
+			violations := 0
+			for _, c := range window {
+				base := chartLineAt(lows[li], slope, c.Time)
+				if c.Low < base-tol {
+					violations++
+				}
+				offset = math.Max(offset, c.High-base)
+			}
+			if offset < avgPrice*0.04 || violations > maxInt(1, len(window)/12) {
+				continue
+			}
+
+			supportTouches := chartLineTouches(lows, lows[li], lows[lj], avgPrice)
+			resTouches := chartOffsetLineTouches(highs, lows[li], slope, offset, avgPrice, lows[li].Time, lows[lj].Time)
+			if supportTouches < 2 || resTouches < 2 {
+				continue
+			}
+
+			kind := "horizontal"
+			if slope > avgPrice*0.00000001 {
+				kind = "ascending"
+			} else if slope < -avgPrice*0.00000001 {
+				kind = "descending"
+			}
+			touches := supportTouches + resTouches
+			ch := ChartChannel{
+				Kind:           kind,
+				SupportStart:   window[0].Time,
+				SupportEnd:     window[len(window)-1].Time,
+				SupportStartPx: chartLineAt(lows[li], slope, window[0].Time),
+				SupportEndPx:   chartLineAt(lows[li], slope, window[len(window)-1].Time),
+				ResStart:       window[0].Time,
+				ResEnd:         window[len(window)-1].Time,
+				ResStartPx:     chartLineAt(lows[li], slope, window[0].Time) + offset,
+				ResEndPx:       chartLineAt(lows[li], slope, window[len(window)-1].Time) + offset,
+				Slope:          slope,
+				Touches:        touches,
+			}
+			if best == nil || ch.Touches > best.Touches || (ch.Touches == best.Touches && ch.SupportEnd > best.SupportEnd) {
+				best = &ch
+			}
+		}
+	}
+	if best == nil || best.Touches < 5 {
+		return nil
+	}
+	return []ChartChannel{*best}
+}
+
+func chartChannelWindow(candles []ChartCandle, start, end int64) []ChartCandle {
+	var out []ChartCandle
+	for _, c := range candles {
+		if c.Time >= start && c.Time <= end {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func chartAvgClose(candles []ChartCandle) float64 {
+	if len(candles) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, c := range candles {
+		sum += c.Close
+	}
+	return sum / float64(len(candles))
+}
+
+func chartLineAt(anchor ChartPivot, slope float64, ts int64) float64 {
+	return anchor.Price + slope*float64(ts-anchor.Time)
+}
+
+func chartSlope(a, b ChartPivot) float64 {
+	dt := float64(b.Time - a.Time)
+	if dt == 0 {
+		return 0
+	}
+	return (b.Price - a.Price) / dt
+}
+
+func chartLineTouches(points []ChartPivot, a, b ChartPivot, avgPrice float64) int {
+	tol := math.Max(avgPrice*0.018, 0.000001)
+	slope := chartSlope(a, b)
+	touches := 0
+	for _, p := range points {
+		if p.Time < a.Time || p.Time > b.Time {
+			continue
+		}
+		expected := a.Price + slope*float64(p.Time-a.Time)
+		if math.Abs(p.Price-expected) <= tol {
+			touches++
+		}
+	}
+	return touches
+}
+
+func chartOffsetLineTouches(points []ChartPivot, anchor ChartPivot, slope, offset, avgPrice float64, start, end int64) int {
+	tol := math.Max(avgPrice*0.018, 0.000001)
+	touches := 0
+	for _, p := range points {
+		if p.Time < start || p.Time > end {
+			continue
+		}
+		expected := chartLineAt(anchor, slope, p.Time) + offset
+		if math.Abs(p.Price-expected) <= tol {
+			touches++
+		}
+	}
+	return touches
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
+	if len(cr.Candles) < 30 {
+		return ChartAnalysis{Bias: "neutral", Summary: "Not enough candles for a reliable technical setup."}
+	}
+	candles := cr.Candles
+	last := candles[len(candles)-1]
+	prev := candles[len(candles)-2]
+	lastClose := last.Close
+	if lastClose <= 0 {
+		return ChartAnalysis{Bias: "neutral", Summary: "No usable close price for technical analysis."}
+	}
+
+	var setups []ChartSetup
+	latestSMA50, hasSMA50 := latestChartLine(cr.SMA50)
+	latestSMA200, hasSMA200 := latestChartLine(cr.SMA200)
+	latestRSI, hasRSI := latestChartLine(cr.RSI14)
+	latestMACD, hasMACD := latestChartMACD(cr.MACD)
+	recent := candles[maxInt(0, len(candles)-30):]
+	shortRecent := candles[maxInt(0, len(candles)-12):]
+	recentHigh := chartRecentHigh(recent)
+	recentLow := chartRecentLow(recent)
+	shortRecentHigh := chartRecentHigh(shortRecent)
+	shortRecentLow := chartRecentLow(shortRecent)
+
+	if support, ok := nearestSupportLevel(cr.Levels, lastClose); ok && recentHigh > lastClose*1.18 {
+		trigger := math.Max(prev.High, last.High)
+		if hasSMA200 && latestSMA200 > trigger && latestSMA200 < recentHigh {
+			trigger = latestSMA200
+		}
+		setups = append(setups, ChartSetup{
+			Kind:              "breakout_rejection_support_test",
+			Title:             "Breakout rejection / support test",
+			Bias:              "decision under bearish pressure",
+			Confidence:        "watch",
+			Detail:            "Price rejected a recent expansion and is now testing a nearby support area.",
+			TriggerPrice:      trigger,
+			InvalidationPrice: support.Price * 0.97,
+			PositiveOutcome:   "A reclaim of the nearest moving-average/rejection zone can stabilize the structure.",
+			NegativeOutcome:   "A confirmed break below support favors a return toward the prior range.",
+		})
+	}
+
+	if hasSMA200 && latestSMA200 > 0 {
+		dist := (lastClose - latestSMA200) / latestSMA200
+		extendedHigh := recentHigh > latestSMA200*1.08
+		testingMA := math.Abs(dist) <= 0.035 || (last.Low <= latestSMA200*1.02 && lastClose >= latestSMA200*0.985)
+		if extendedHigh && testingMA {
+			confidence := "watch"
+			if lastClose >= latestSMA200 && lastClose >= prev.Close {
+				confidence = "medium"
+			}
+			setups = append(setups, ChartSetup{
+				Kind:              "sma200_pullback",
+				Title:             "Pullback on SMA200",
+				Bias:              "bullish if defended",
+				Confidence:        confidence,
+				Detail:            "Price is retesting the long-term moving average after a strong upside move.",
+				TriggerPrice:      math.Max(prev.High, last.High),
+				InvalidationPrice: latestSMA200 * 0.985,
+				PositiveOutcome:   "Bounce and close back above the retest zone can confirm continuation.",
+				NegativeOutcome:   "Clean close below the SMA200 weakens the breakout and can pull price back into the old range.",
+			})
+		}
+	}
+
+	if lvl, ok := nearestRetestedResistance(cr.Levels, lastClose, recentHigh); ok {
+		setups = append(setups, ChartSetup{
+			Kind:              "breakout_retest",
+			Title:             "Breakout retest",
+			Bias:              "bullish if support holds",
+			Confidence:        "watch",
+			Detail:            "Price is near an old resistance area that may now act as support.",
+			TriggerPrice:      math.Max(prev.High, last.High),
+			InvalidationPrice: lvl.Price * 0.97,
+			PositiveOutcome:   "Hold above the retest area followed by a higher close favors a continuation attempt.",
+			NegativeOutcome:   "Failure back below the retest area suggests the breakout may be rejected.",
+		})
+	}
+
+	if hasSMA50 && hasSMA200 && latestSMA50 > latestSMA200 && lastClose > latestSMA50 {
+		recentLowNearSMA50 := shortRecentLow <= latestSMA50*1.08 && shortRecentLow >= latestSMA50*0.84
+		priceRecovered := lastClose > prev.Close || lastClose > latestSMA50*1.03
+		if recentLowNearSMA50 && priceRecovered {
+			setups = append(setups, ChartSetup{
+				Kind:              "ma_support_bounce",
+				Title:             "Moving-average support bounce",
+				Bias:              "bullish",
+				Confidence:        "medium",
+				Detail:            "Price pulled back into the rising moving-average zone and has reclaimed the short-term average.",
+				TriggerPrice:      shortRecentHigh,
+				InvalidationPrice: latestSMA50 * 0.97,
+				PositiveOutcome:   "Holding above the short-term average keeps the trend-continuation setup alive.",
+				NegativeOutcome:   "A close back below the moving-average zone would weaken the rebound.",
+			})
+		}
+	}
+
+	if ch, ok := latestChartChannel(cr.Channels); ok {
+		chTop := ch.ResEndPx
+		chBottom := ch.SupportEndPx
+		if ch.ResEnd > 0 {
+			chTop = ch.ResEndPx + ch.Slope*float64(last.Time-ch.ResEnd)
+		}
+		if ch.SupportEnd > 0 {
+			chBottom = ch.SupportEndPx + ch.Slope*float64(last.Time-ch.SupportEnd)
+		}
+		if chTop > 0 && chBottom > 0 {
+			wasAboveChannel := recentHigh > chTop*1.08
+			isRetestingTop := wasAboveChannel && last.Low <= chTop*1.04 && lastClose >= chTop*0.96
+			switch {
+			case isRetestingTop:
+				confidence := "watch"
+				if lastClose >= chTop && lastClose >= prev.Close {
+					confidence = "medium"
+				}
+				setups = append(setups, ChartSetup{
+					Kind:              "channel_breakout_retest",
+					Title:             "Channel breakout retest",
+					Bias:              "bullish if defended",
+					Confidence:        confidence,
+					Detail:            "Price broke above the detected channel and is now retesting the upper boundary.",
+					TriggerPrice:      math.Max(prev.High, last.High),
+					InvalidationPrice: chTop * 0.97,
+					PositiveOutcome:   "A close back above the retest zone can validate the breakout attempt.",
+					NegativeOutcome:   "Failure below the upper boundary puts price back into the old channel/range.",
+				})
+			case lastClose > chTop*1.01:
+				setups = append(setups, ChartSetup{
+					Kind:              "channel_breakout",
+					Title:             "Channel breakout",
+					Bias:              "bullish",
+					Confidence:        "medium",
+					Detail:            "Price has broken above the detected consolidation/channel.",
+					TriggerPrice:      last.High,
+					InvalidationPrice: chTop * 0.98,
+					PositiveOutcome:   "Staying above the channel top keeps the breakout structure intact.",
+					NegativeOutcome:   "Return inside the channel increases the risk of a false breakout.",
+				})
+			case lastClose < chBottom*0.99 && !hasMajorDecisionSetup(setups):
+				setups = append(setups, ChartSetup{
+					Kind:              "channel_breakdown",
+					Title:             "Channel breakdown",
+					Bias:              "bearish",
+					Confidence:        "medium",
+					Detail:            "Price has broken below the detected channel support.",
+					TriggerPrice:      chBottom,
+					InvalidationPrice: chTop,
+					PositiveOutcome:   "A reclaim of the channel would neutralize the breakdown.",
+					NegativeOutcome:   "Staying below channel support favors downside continuation.",
+				})
+			case lastClose >= chBottom*0.99 && lastClose <= chTop*1.01 && !wasAboveChannel:
+				setups = append(setups, ChartSetup{
+					Kind:              "inside_channel",
+					Title:             "Inside channel",
+					Bias:              ch.Kind,
+					Confidence:        "watch",
+					Detail:            "Price remains inside the detected channel/range.",
+					TriggerPrice:      chTop,
+					InvalidationPrice: chBottom,
+					PositiveOutcome:   "Break and hold above the upper line favors expansion.",
+					NegativeOutcome:   "Break below the lower line favors range failure.",
+				})
+			}
+		}
+	}
+
+	if div := latestRecentDivergence(cr.Divergences, last.Time); div.Kind != "" && isDivergenceStillActionable(div, setups, lastClose) {
+		bias := "bullish"
+		title := "Bullish RSI divergence"
+		if div.Kind == "bearish" {
+			bias = "bearish"
+			title = "Bearish RSI divergence"
+		}
+		setups = append(setups, ChartSetup{
+			Kind:            div.Kind + "_rsi_divergence",
+			Title:           title,
+			Bias:            bias,
+			Confidence:      "watch",
+			Detail:          "Recent pivot structure shows price and RSI moving in opposite directions.",
+			PositiveOutcome: "Confirmation comes from price reclaiming the latest pivot area.",
+			NegativeOutcome: "No confirmation means the divergence remains only a warning signal.",
+		})
+	}
+
+	sort.SliceStable(setups, func(i, j int) bool {
+		return chartSetupPriority(setups[i]) < chartSetupPriority(setups[j])
+	})
+
+	bias := chartAnalysisBias(setups, lastClose, latestSMA50, hasSMA50, latestSMA200, hasSMA200, latestRSI, hasRSI, latestMACD, hasMACD)
+	return ChartAnalysis{
+		Bias:    bias,
+		Summary: chartAnalysisSummary(setups, bias, recentLow, recentHigh),
+		Setups:  setups,
+	}
+}
+
+func latestChartLine(points []ChartLinePoint) (float64, bool) {
+	if len(points) == 0 {
+		return 0, false
+	}
+	return points[len(points)-1].Value, true
+}
+
+func latestChartMACD(points []ChartMACDPoint) (ChartMACDPoint, bool) {
+	if len(points) == 0 {
+		return ChartMACDPoint{}, false
+	}
+	return points[len(points)-1], true
+}
+
+func chartRecentHigh(candles []ChartCandle) float64 {
+	if len(candles) == 0 {
+		return 0
+	}
+	high := candles[0].High
+	for _, c := range candles[1:] {
+		high = math.Max(high, c.High)
+	}
+	return high
+}
+
+func chartRecentLow(candles []ChartCandle) float64 {
+	if len(candles) == 0 {
+		return 0
+	}
+	low := candles[0].Low
+	for _, c := range candles[1:] {
+		low = math.Min(low, c.Low)
+	}
+	return low
+}
+
+func nearestSupportLevel(levels []ChartLevel, lastClose float64) (ChartLevel, bool) {
+	if lastClose <= 0 {
+		return ChartLevel{}, false
+	}
+	var best ChartLevel
+	bestDist := math.MaxFloat64
+	for _, lvl := range levels {
+		if lvl.Kind != "support" || lvl.Price <= 0 {
+			continue
+		}
+		dist := math.Abs(lastClose-lvl.Price) / lastClose
+		if dist <= 0.055 && dist < bestDist {
+			best = lvl
+			bestDist = dist
+		}
+	}
+	return best, best.Price > 0
+}
+
+func nearestRetestedResistance(levels []ChartLevel, lastClose, recentHigh float64) (ChartLevel, bool) {
+	if lastClose <= 0 || recentHigh <= lastClose*1.04 {
+		return ChartLevel{}, false
+	}
+	var best ChartLevel
+	bestDist := math.MaxFloat64
+	for _, lvl := range levels {
+		if lvl.Kind != "resistance" || lvl.Price <= 0 || lvl.Price > lastClose*1.04 {
+			continue
+		}
+		dist := math.Abs(lastClose-lvl.Price) / lastClose
+		if dist <= 0.045 && dist < bestDist {
+			best = lvl
+			bestDist = dist
+		}
+	}
+	return best, best.Price > 0
+}
+
+func latestChartChannel(channels []ChartChannel) (ChartChannel, bool) {
+	if len(channels) == 0 {
+		return ChartChannel{}, false
+	}
+	return channels[len(channels)-1], true
+}
+
+func latestRecentDivergence(divs []ChartDivergence, lastTime int64) ChartDivergence {
+	const maxAge = int64(90 * 24 * time.Hour / time.Second)
+	for i := len(divs) - 1; i >= 0; i-- {
+		if lastTime-divs[i].ToTime <= maxAge {
+			return divs[i]
+		}
+	}
+	return ChartDivergence{}
+}
+
+func hasMajorDecisionSetup(setups []ChartSetup) bool {
+	for _, s := range setups {
+		if s.Kind == "breakout_rejection_support_test" || s.Kind == "sma200_pullback" || s.Kind == "breakout_retest" {
+			return true
+		}
+	}
+	return false
+}
+
+func chartSetupPriority(setup ChartSetup) int {
+	switch setup.Kind {
+	case "breakout_rejection_support_test":
+		return 10
+	case "sma200_pullback":
+		return 20
+	case "ma_support_bounce":
+		return 25
+	case "breakout_retest":
+		return 30
+	case "channel_breakout_retest":
+		return 40
+	case "channel_breakout", "channel_breakdown":
+		return 60
+	case "inside_channel":
+		return 70
+	}
+	if strings.Contains(setup.Kind, "rsi_divergence") {
+		return 50
+	}
+	return 100
+}
+
+func isDivergenceStillActionable(div ChartDivergence, setups []ChartSetup, lastClose float64) bool {
+	if div.Kind == "bearish" {
+		if lastClose > div.ToPrice*1.01 {
+			return false
+		}
+		for _, s := range setups {
+			if s.Kind == "ma_support_bounce" || s.Kind == "channel_breakout" || s.Kind == "breakout_retest" {
+				return false
+			}
+		}
+	}
+	if div.Kind == "bullish" && lastClose < div.ToPrice*0.99 {
+		return false
+	}
+	return true
+}
+
+func chartAnalysisBias(setups []ChartSetup, lastClose, sma50 float64, hasSMA50 bool, sma200 float64, hasSMA200 bool, rsi float64, hasRSI bool, macd ChartMACDPoint, hasMACD bool) string {
+	score := 0
+	hasActiveRetest := false
+	hasDecisionSetup := false
+	for _, s := range setups {
+		if strings.Contains(s.Bias, "bullish") {
+			score += 2
+		}
+		if strings.Contains(s.Bias, "bearish") {
+			score -= 2
+		}
+		if strings.Contains(s.Kind, "retest") || strings.Contains(s.Kind, "pullback") {
+			hasActiveRetest = true
+		}
+		if strings.Contains(s.Bias, "decision") || s.Kind == "breakout_rejection_support_test" {
+			hasDecisionSetup = true
+		}
+	}
+	if hasSMA50 && lastClose > sma50 {
+		score++
+	} else if hasSMA50 && lastClose < sma50 {
+		score--
+	}
+	if hasSMA200 && lastClose > sma200 {
+		score++
+	} else if hasSMA200 && lastClose < sma200 {
+		score--
+	}
+	if hasRSI && rsi >= 55 && rsi <= 75 {
+		score++
+	} else if hasRSI && rsi < 45 {
+		score--
+	}
+	if hasMACD && macd.Histogram > 0 {
+		score++
+	} else if hasMACD && macd.Histogram < 0 {
+		score--
+	}
+	if score >= 3 {
+		return "bullish"
+	}
+	if (hasActiveRetest || hasDecisionSetup) && score > -5 {
+		return "decision"
+	}
+	if score <= -3 {
+		return "bearish"
+	}
+	return "neutral"
+}
+
+func chartAnalysisSummary(setups []ChartSetup, bias string, recentLow, recentHigh float64) string {
+	if len(setups) == 0 {
+		return "No high-confidence setup detected. Price is between recent support and resistance zones."
+	}
+	switch bias {
+	case "bullish":
+		return "Bullish context: price has reclaimed an important support/moving-average area after a pullback."
+	case "bearish":
+		return "Bearish context. Reclaiming the failed level is needed before the setup improves."
+	case "decision":
+		return "Decision zone: price is testing support after a sharp rejection, so confirmation matters more than the current indicator bias."
+	default:
+		if recentLow > 0 && recentHigh > 0 {
+			return "Decision zone: price is reacting around an important level after a recent expansion."
+		}
+		return "Decision zone: wait for confirmation from the active setup."
+	}
 }
 
 func rsiValue(avgGain, avgLoss float64) float64 {

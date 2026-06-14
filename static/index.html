@@ -495,6 +495,22 @@
     .charts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
     .charts-title { font-size: 16px; font-weight: 700; color: #e6edf3; }
     .charts-meta { font-size: 12px; color: #8b949e; }
+    .charts-analysis { display: none; grid-template-columns: 190px minmax(0, 1fr); gap: 12px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #21262d; border-radius: 6px; background: #090d13; }
+    .charts-analysis.show { display: grid; }
+    .charts-analysis-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .charts-analysis-bias { width: fit-content; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; background: #21262d; color: #8b949e; }
+    .charts-analysis-bias.bullish { background: rgba(63,185,80,.14); color: #3fb950; }
+    .charts-analysis-bias.bearish { background: rgba(248,81,73,.14); color: #f85149; }
+    .charts-analysis-summary { color: #c9d1d9; font-size: 12px; line-height: 1.45; }
+    .charts-setups { display: grid; gap: 8px; min-width: 0; }
+    .charts-setup { display: grid; grid-template-columns: minmax(120px, 170px) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; padding-left: 10px; border-left: 2px solid #30363d; }
+    .charts-setup.bullish { border-left-color: #3fb950; }
+    .charts-setup.bearish { border-left-color: #f85149; }
+    .charts-setup-title { color: #e6edf3; font-size: 12px; font-weight: 700; }
+    .charts-setup-meta { margin-top: 3px; color: #6e7681; font-family: 'SF Mono', monospace; font-size: 10px; }
+    .charts-setup-detail { color: #8b949e; font-size: 11px; line-height: 1.45; }
+    .charts-outcome { color: #8b949e; font-size: 11px; line-height: 1.45; }
+    .charts-outcome strong { color: #c9d1d9; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
     .charts-canvas-wrap { position: relative; width: 100%; height: 900px; }
     #charts-canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
     .charts-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #6e7681; font-size: 13px; text-align: center; pointer-events: none; }
@@ -522,6 +538,8 @@
     @media (max-width: 720px) {
       .charts-layout { grid-template-columns: 1fr; }
       .charts-toolbar { grid-template-columns: 1fr 1fr; }
+      .charts-analysis { grid-template-columns: 1fr; }
+      .charts-setup { grid-template-columns: 1fr; }
       .charts-canvas-wrap { height: 760px; }
       .charts-watchlist { position: static; max-height: none; }
     }
@@ -860,6 +878,7 @@
             <div class="charts-title" id="charts-title">BTC-USD</div>
             <div class="charts-meta" id="charts-meta">No chart loaded</div>
           </div>
+          <div class="charts-analysis" id="charts-analysis"></div>
           <div class="charts-canvas-wrap">
             <canvas id="charts-canvas"></canvas>
             <div class="charts-empty" id="charts-empty">Open Charts to load historical candles from Yahoo Finance.</div>
@@ -1459,6 +1478,7 @@ function drawChart(data) {
   const meta = document.getElementById('charts-meta');
   if (!canvas || !data || !data.candles || data.candles.length === 0) return;
   if (empty) empty.style.display = 'none';
+  renderChartAnalysis(data);
   const wrap = canvas.parentElement;
   const dpr = window.devicePixelRatio || 1;
   const w = Math.max(320, wrap.clientWidth);
@@ -1476,10 +1496,12 @@ function drawChart(data) {
   const volumeH = 96;
   const rsiH = 126;
   const macdH = 126;
+  const dateAxisH = 22;
   const panelGap = 24;
   const chartW = w - pad.left - pad.right;
-  const priceH = h - pad.top - pad.bottom - volumeH - rsiH - macdH - panelGap * 3;
-  const volumeTop = pad.top + priceH + panelGap;
+  const priceH = h - pad.top - pad.bottom - volumeH - rsiH - macdH - dateAxisH - panelGap * 3;
+  const dateAxisTop = pad.top + priceH;
+  const volumeTop = dateAxisTop + dateAxisH + panelGap;
   const rsiTop = volumeTop + volumeH + panelGap;
   const macdTop = rsiTop + rsiH + panelGap;
   const min = Math.min(...candles.map(c => c.low));
@@ -1487,7 +1509,7 @@ function drawChart(data) {
   const span = Math.max(0.000001, max - min);
   const y = v => pad.top + (max - v) / span * priceH;
   const x = i => pad.left + (candles.length === 1 ? chartW / 2 : i / (candles.length - 1) * chartW);
-  chartFrame = { pad, w, h, chartW, priceH, min, max, span, candles, currency: data.currency, x, y };
+  chartFrame = { pad, w, h, chartW, priceH, dateAxisTop, dateAxisH, min, max, span, candles, currency: data.currency, x, y };
 
   ctx.font = '11px SF Mono, monospace';
   ctx.lineWidth = 1;
@@ -1505,6 +1527,8 @@ function drawChart(data) {
   }
 
   const bodyW = Math.max(2, Math.min(10, chartW / candles.length * 0.62));
+  const indexByTime = new Map(candles.map((c, i) => [c.time, i]));
+  drawChartChannels(ctx, data.channels || [], indexByTime, x, y);
   drawChartLevels(ctx, data.levels || [], y, pad, w, priceH);
   candles.forEach((c, i) => {
     const xx = x(i);
@@ -1522,22 +1546,17 @@ function drawChart(data) {
     ctx.fillRect(xx - bodyW / 2, top, bodyW, bh);
   });
 
-  const indexByTime = new Map(candles.map((c, i) => [c.time, i]));
   drawMovingAverage(ctx, data.sma50 || [], indexByTime, x, y, '#58a6ff', 'SMA 50', pad.left, pad.top + 12);
   drawMovingAverage(ctx, data.sma100 || [], indexByTime, x, y, '#d29922', 'SMA 100', pad.left + 76, pad.top + 12);
   drawMovingAverage(ctx, data.sma200 || [], indexByTime, x, y, '#db61a2', 'SMA 200', pad.left + 160, pad.top + 12);
   drawChartDivergences(ctx, data.divergences || [], indexByTime, x, y);
+  drawChartDateAxis(ctx, candles, pad, w, dateAxisTop, dateAxisH);
   drawVolumePanel(ctx, candles, x, bodyW, pad, w, volumeTop, volumeH);
   drawRSIPanel(ctx, data.rsi14 || [], candles, x, pad, w, rsiTop, rsiH);
   drawMACDPanel(ctx, data.macd || [], candles, x, bodyW, pad, w, macdTop, macdH);
 
   const first = candles[0];
   const last = candles[candles.length - 1];
-  ctx.fillStyle = '#6e7681';
-  ctx.textAlign = 'left';
-  ctx.fillText(formatChartDate(first.time), pad.left, h - 10);
-  ctx.textAlign = 'right';
-  ctx.fillText(formatChartDate(last.time), w - pad.right, h - 10);
 
   const change = (last.close - first.close) / first.close * 100;
   const latestRSI = data.rsi14 && data.rsi14.length ? data.rsi14[data.rsi14.length - 1].value : null;
@@ -1553,6 +1572,47 @@ function drawChart(data) {
     meta.innerHTML = `${candles.length} candles · ${data.interval} · ${formatChartPrice(last.close, data.currency)} · <span class="${change >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span> · Vol ${formatVolume(last.volume || 0)}${latestRSI == null ? '' : ` · RSI 14 ${latestRSI.toFixed(1)}`}${latestMACD == null ? '' : ` · MACD ${formatIndicator(latestMACD.macd)}/${formatIndicator(latestMACD.signal)}`}${latestSMA ? ` · ${latestSMA}` : ''} · ${cacheLabel}${updated ? ` · ${updated}` : ''}`;
   }
   if (chartHover) drawChartCrosshair(ctx, chartHover);
+}
+
+function renderChartAnalysis(data) {
+  const el = document.getElementById('charts-analysis');
+  if (!el) return;
+  const analysis = data.analysis || {};
+  const setups = Array.isArray(analysis.setups) ? analysis.setups : [];
+  if (!analysis.summary && setups.length === 0) {
+    el.classList.remove('show');
+    el.innerHTML = '';
+    return;
+  }
+  const bias = (analysis.bias || 'neutral').toLowerCase();
+  const setupHtml = setups.length ? setups.slice(0, 3).map(s => {
+    const setupBias = (s.bias || '').toLowerCase();
+    const biasCls = setupBias.includes('bullish') ? 'bullish' : setupBias.includes('bearish') ? 'bearish' : '';
+    const levels = [
+      s.triggerPrice ? `trigger ${formatChartPrice(s.triggerPrice, data.currency)}` : '',
+      s.invalidationPrice ? `invalid ${formatChartPrice(s.invalidationPrice, data.currency)}` : '',
+      s.confidence ? s.confidence : '',
+    ].filter(Boolean).join(' · ');
+    return `<div class="charts-setup ${biasCls}">
+      <div>
+        <div class="charts-setup-title">${esc(s.title || 'Setup')}</div>
+        <div class="charts-setup-meta">${esc(levels || s.bias || '')}</div>
+      </div>
+      <div class="charts-setup-detail">${esc(s.detail || '')}</div>
+      <div class="charts-outcome">
+        <div><strong>Upside</strong> ${esc(s.positiveOutcome || '')}</div>
+        <div><strong>Risk</strong> ${esc(s.negativeOutcome || '')}</div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="charts-setup-detail">No active setup detected on the current range.</div>';
+  el.innerHTML = `
+    <div class="charts-analysis-main">
+      <div class="charts-analysis-bias ${bias === 'bullish' || bias === 'bearish' ? bias : ''}">${esc(bias)}</div>
+      <div class="charts-analysis-summary">${esc(analysis.summary || '')}</div>
+    </div>
+    <div class="charts-setups">${setupHtml}</div>
+  `;
+  el.classList.add('show');
 }
 
 function drawChartCrosshair(ctx, hover) {
@@ -1573,7 +1633,7 @@ function drawChartCrosshair(ctx, hover) {
   ctx.strokeStyle = 'rgba(139,148,158,.75)';
   ctx.beginPath();
   ctx.moveTo(candleX, f.pad.top);
-  ctx.lineTo(candleX, f.h - f.pad.bottom);
+  ctx.lineTo(candleX, f.dateAxisTop + f.dateAxisH);
   ctx.moveTo(f.pad.left, yPos);
   ctx.lineTo(f.w - f.pad.right, yPos);
   ctx.stroke();
@@ -1597,7 +1657,7 @@ function drawChartCrosshair(ctx, hover) {
   ctx.textAlign = 'center';
   const dateW = ctx.measureText(dateLabel).width + 14;
   const dateX = Math.max(f.pad.left + dateW / 2, Math.min(f.w - f.pad.right - dateW / 2, candleX));
-  const dateY = f.h - 14;
+  const dateY = f.dateAxisTop + f.dateAxisH / 2 + 2;
   ctx.fillStyle = '#21262d';
   ctx.strokeStyle = '#6e7681';
   ctx.beginPath();
@@ -1606,6 +1666,32 @@ function drawChartCrosshair(ctx, hover) {
   ctx.stroke();
   ctx.fillStyle = '#e6edf3';
   ctx.fillText(dateLabel, dateX, dateY);
+  ctx.restore();
+}
+
+function drawChartDateAxis(ctx, candles, pad, w, top, height) {
+  if (!candles || candles.length === 0) return;
+  const left = pad.left;
+  const right = w - pad.right;
+  const width = right - left;
+  const tickCount = Math.min(6, Math.max(2, Math.floor(width / 150)));
+  ctx.save();
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, top + 0.5);
+  ctx.lineTo(right, top + 0.5);
+  ctx.stroke();
+  ctx.font = '11px SF Mono, monospace';
+  ctx.fillStyle = '#6e7681';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < tickCount; i++) {
+    const ratio = tickCount === 1 ? 0 : i / (tickCount - 1);
+    const idx = Math.round(ratio * (candles.length - 1));
+    const xx = left + ratio * width;
+    ctx.textAlign = i === 0 ? 'left' : i === tickCount - 1 ? 'right' : 'center';
+    ctx.fillText(formatChartDate(candles[idx].time), xx, top + height / 2 + 2);
+  }
   ctx.restore();
 }
 
@@ -1650,6 +1736,41 @@ function drawMovingAverage(ctx, points, indexByTime, x, y, color, label, labelX,
   ctx.textAlign = 'left';
   ctx.font = '11px SF Mono, monospace';
   ctx.fillText(label, labelX, labelY);
+}
+
+function drawChartChannels(ctx, channels, indexByTime, x, y) {
+  if (!channels || channels.length === 0) return;
+  ctx.save();
+  ctx.font = '10px SF Mono, monospace';
+  for (const ch of channels) {
+    const s1 = indexByTime.get(ch.supportStart);
+    const s2 = indexByTime.get(ch.supportEnd);
+    const r1 = indexByTime.get(ch.resistanceStart);
+    const r2 = indexByTime.get(ch.resistanceEnd);
+    if (s1 == null || s2 == null || r1 == null || r2 == null) continue;
+    const color = ch.kind === 'ascending' ? '#3fb950' : ch.kind === 'descending' ? '#f85149' : '#d29922';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    ctx.moveTo(x(s1), y(ch.supportStartPrice));
+    ctx.lineTo(x(s2), y(ch.supportEndPrice));
+    ctx.moveTo(x(r1), y(ch.resistanceStartPrice));
+    ctx.lineTo(x(r2), y(ch.resistanceEndPrice));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.12;
+    ctx.beginPath();
+    ctx.moveTo(x(s1), y(ch.supportStartPrice));
+    ctx.lineTo(x(s2), y(ch.supportEndPrice));
+    ctx.lineTo(x(r2), y(ch.resistanceEndPrice));
+    ctx.lineTo(x(r1), y(ch.resistanceStartPrice));
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawChartLevels(ctx, levels, y, pad, w, priceH) {
