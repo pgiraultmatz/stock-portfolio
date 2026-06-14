@@ -1748,7 +1748,7 @@ function drawChartChannels(ctx, channels, indexByTime, x, y) {
     const r1 = indexByTime.get(ch.resistanceStart);
     const r2 = indexByTime.get(ch.resistanceEnd);
     if (s1 == null || s2 == null || r1 == null || r2 == null) continue;
-    const color = ch.kind === 'ascending' ? '#3fb950' : ch.kind === 'descending' ? '#f85149' : '#d29922';
+    const color = ch.kind === 'ascending' ? '#d29922' : ch.kind === 'descending' ? '#58a6ff' : '#8b949e';
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.55;

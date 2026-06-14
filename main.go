@@ -1496,6 +1496,7 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 
 	var setups []ChartSetup
 	latestSMA50, hasSMA50 := latestChartLine(cr.SMA50)
+	latestSMA100, hasSMA100 := latestChartLine(cr.SMA100)
 	latestSMA200, hasSMA200 := latestChartLine(cr.SMA200)
 	latestRSI, hasRSI := latestChartLine(cr.RSI14)
 	latestMACD, hasMACD := latestChartMACD(cr.MACD)
@@ -1579,6 +1580,38 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		}
 	}
 
+	if hasSMA50 {
+		if div := latestRecentDivergence(cr.Divergences, last.Time); div.Kind == "bearish" && bearishDivergencePlayedThenMA50Reclaimed(candles, cr.SMA50, div, last) {
+			setups = append(setups, ChartSetup{
+				Kind:              "ma50_reclaim_after_bearish_divergence",
+				Title:             "MA50 reclaim after bearish divergence",
+				Bias:              "bullish with divergence warning",
+				Confidence:        "watch",
+				Detail:            "The bearish divergence triggered a pullback below SMA50, but price has now closed back above it.",
+				TriggerPrice:      math.Max(prev.High, last.High),
+				InvalidationPrice: latestSMA50 * 0.97,
+				PositiveOutcome:   "Holding above SMA50 can turn the pullback into trend continuation.",
+				NegativeOutcome:   "Losing SMA50 again would reactivate the bearish-divergence risk.",
+			})
+		}
+	}
+
+	if hasSMA50 && hasSMA100 {
+		if div := latestRecentDivergence(cr.Divergences, last.Time); div.Kind == "bearish" && bearishDivergencePlayedThenMA100Reclaimed(candles, cr.SMA50, cr.SMA100, div, last) {
+			setups = append(setups, ChartSetup{
+				Kind:              "ma100_reclaim_after_bearish_divergence",
+				Title:             "MA100 support reclaim",
+				Bias:              "decision under bearish pressure",
+				Confidence:        "watch",
+				Detail:            "Bearish divergence and trend-channel weakness have played out; price is now attempting to hold SMA100 support.",
+				TriggerPrice:      latestSMA50,
+				InvalidationPrice: latestSMA100 * 0.97,
+				PositiveOutcome:   "Holding above SMA100 can drive a rebound toward SMA50 or the broken channel.",
+				NegativeOutcome:   "Losing SMA100 confirms downside continuation risk toward lower supports.",
+			})
+		}
+	}
+
 	if ch, ok := latestChartChannel(cr.Channels); ok {
 		chTop := ch.ResEndPx
 		chBottom := ch.SupportEndPx
@@ -1588,7 +1621,7 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		if ch.SupportEnd > 0 {
 			chBottom = ch.SupportEndPx + ch.Slope*float64(last.Time-ch.SupportEnd)
 		}
-		if chTop > 0 && chBottom > 0 {
+		if chTop > 0 && chBottom > 0 && channelStillRelevant(ch, last.Time) {
 			wasAboveChannel := recentHigh > chTop*1.08
 			isRetestingTop := wasAboveChannel && last.Low <= chTop*1.04 && lastClose >= chTop*0.96
 			switch {
@@ -1760,13 +1793,21 @@ func latestChartChannel(channels []ChartChannel) (ChartChannel, bool) {
 }
 
 func latestRecentDivergence(divs []ChartDivergence, lastTime int64) ChartDivergence {
-	const maxAge = int64(90 * 24 * time.Hour / time.Second)
+	const maxAge = int64(45 * 24 * time.Hour / time.Second)
 	for i := len(divs) - 1; i >= 0; i-- {
 		if lastTime-divs[i].ToTime <= maxAge {
 			return divs[i]
 		}
 	}
 	return ChartDivergence{}
+}
+
+func channelStillRelevant(ch ChartChannel, lastTime int64) bool {
+	if ch.SupportEnd == 0 || lastTime <= ch.SupportEnd {
+		return true
+	}
+	const maxAge = int64(45 * 24 * time.Hour / time.Second)
+	return lastTime-ch.SupportEnd <= maxAge
 }
 
 func hasMajorDecisionSetup(setups []ChartSetup) bool {
@@ -1782,8 +1823,12 @@ func chartSetupPriority(setup ChartSetup) int {
 	switch setup.Kind {
 	case "breakout_rejection_support_test":
 		return 10
+	case "ma100_reclaim_after_bearish_divergence":
+		return 15
 	case "sma200_pullback":
 		return 20
+	case "ma50_reclaim_after_bearish_divergence":
+		return 22
 	case "ma_support_bounce":
 		return 25
 	case "breakout_retest":
@@ -1799,6 +1844,64 @@ func chartSetupPriority(setup ChartSetup) int {
 		return 50
 	}
 	return 100
+}
+
+func bearishDivergencePlayedThenMA50Reclaimed(candles []ChartCandle, sma50 []ChartLinePoint, div ChartDivergence, last ChartCandle) bool {
+	if len(candles) == 0 || len(sma50) == 0 || div.Kind != "bearish" || last.Time <= div.ToTime {
+		return false
+	}
+	lastSMA, ok := chartLineValueAtOrBefore(sma50, last.Time)
+	if !ok || lastSMA <= 0 || last.Close < lastSMA {
+		return false
+	}
+	closedBelow := false
+	for _, c := range candles {
+		if c.Time <= div.ToTime {
+			continue
+		}
+		if c.Time > last.Time {
+			break
+		}
+		ma, ok := chartLineValueAtOrBefore(sma50, c.Time)
+		if ok && ma > 0 && c.Close < ma*0.99 {
+			closedBelow = true
+			break
+		}
+	}
+	return closedBelow
+}
+
+func bearishDivergencePlayedThenMA100Reclaimed(candles []ChartCandle, sma50, sma100 []ChartLinePoint, div ChartDivergence, last ChartCandle) bool {
+	if len(candles) == 0 || len(sma50) == 0 || len(sma100) == 0 || div.Kind != "bearish" || last.Time <= div.ToTime {
+		return false
+	}
+	lastSMA50, ok50 := chartLineValueAtOrBefore(sma50, last.Time)
+	lastSMA100, ok100 := chartLineValueAtOrBefore(sma100, last.Time)
+	if !ok50 || !ok100 || lastSMA50 <= 0 || lastSMA100 <= 0 {
+		return false
+	}
+	if last.Close < lastSMA100*0.995 || last.Close >= lastSMA50 {
+		return false
+	}
+	touchedOrLostSMA100 := false
+	closedBelowSMA50 := false
+	for _, c := range candles {
+		if c.Time <= div.ToTime {
+			continue
+		}
+		if c.Time > last.Time {
+			break
+		}
+		ma50, ok50 := chartLineValueAtOrBefore(sma50, c.Time)
+		ma100, ok100 := chartLineValueAtOrBefore(sma100, c.Time)
+		if ok50 && ma50 > 0 && c.Close < ma50*0.99 {
+			closedBelowSMA50 = true
+		}
+		if ok100 && ma100 > 0 && (c.Low <= ma100*1.03 || c.Close < ma100*0.99) {
+			touchedOrLostSMA100 = true
+		}
+	}
+	return closedBelowSMA50 && touchedOrLostSMA100
 }
 
 func isDivergenceStillActionable(div ChartDivergence, setups []ChartSetup, lastClose float64) bool {
@@ -1832,7 +1935,7 @@ func chartAnalysisBias(setups []ChartSetup, lastClose, sma50 float64, hasSMA50 b
 		if strings.Contains(s.Kind, "retest") || strings.Contains(s.Kind, "pullback") {
 			hasActiveRetest = true
 		}
-		if strings.Contains(s.Bias, "decision") || s.Kind == "breakout_rejection_support_test" {
+		if strings.Contains(s.Bias, "decision") || s.Kind == "breakout_rejection_support_test" || s.Kind == "ma100_reclaim_after_bearish_divergence" {
 			hasDecisionSetup = true
 		}
 	}
@@ -1871,6 +1974,12 @@ func chartAnalysisBias(setups []ChartSetup, lastClose, sma50 float64, hasSMA50 b
 func chartAnalysisSummary(setups []ChartSetup, bias string, recentLow, recentHigh float64) string {
 	if len(setups) == 0 {
 		return "No high-confidence setup detected. Price is between recent support and resistance zones."
+	}
+	if len(setups) > 0 && setups[0].Kind == "ma50_reclaim_after_bearish_divergence" {
+		return "Bullish watch: the bearish divergence has already produced a pullback, and price is trying to reclaim SMA50."
+	}
+	if len(setups) > 0 && setups[0].Kind == "ma100_reclaim_after_bearish_divergence" {
+		return "Decision zone: bearish divergence and channel weakness have played out, but price is now attempting to hold SMA100 support."
 	}
 	switch bias {
 	case "bullish":
