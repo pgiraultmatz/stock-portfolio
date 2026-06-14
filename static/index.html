@@ -488,9 +488,11 @@
     .charts-view { max-width: 1480px; margin: 0 auto; padding: 14px 0 34px; }
     .charts-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
     .charts-main { min-width: 0; }
-    .charts-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto auto; gap: 10px; align-items: center; margin-bottom: 14px; }
+    .charts-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto auto auto; gap: 10px; align-items: center; margin-bottom: 14px; }
     .charts-toolbar input, .charts-toolbar select { min-width: 0; padding: 9px 11px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
     .charts-toolbar input:focus, .charts-toolbar select:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.16); }
+    .charts-toggle { padding: 9px 11px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: 12px; font-weight: 800; letter-spacing: .04em; cursor: pointer; }
+    .charts-toggle.active { color: #d29922; border-color: rgba(210,153,34,.6); background: rgba(210,153,34,.08); }
     .charts-panel { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 14px; }
     .charts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
     .charts-title { font-size: 16px; font-weight: 700; color: #e6edf3; }
@@ -871,6 +873,7 @@
             <option value="1d" selected>Daily</option>
             <option value="1wk">Weekly</option>
           </select>
+          <button id="charts-fib-toggle" class="charts-toggle active" onclick="toggleChartFibs()" title="Toggle Fibonacci retracements">Fib</button>
           <button class="btn btn-primary" onclick="loadChart()">Load</button>
         </div>
         <div class="charts-panel">
@@ -1325,11 +1328,13 @@ let chartLoadedOnce = false;
 let chartHover = null;
 let chartFrame = null;
 let chartCrosshairReady = false;
+let chartShowFibs = localStorage.getItem('chartShowFibs') !== '0';
 let collapsedChartCats = new Set(JSON.parse(localStorage.getItem('collapsedChartCats') || '[]'));
 
 function initChartsView() {
   renderChartSymbols();
   renderChartsWatchlist();
+  syncChartFibToggle();
   setupChartCrosshair();
   if (!chartLoadedOnce) {
     chartLoadedOnce = true;
@@ -1337,6 +1342,20 @@ function initChartsView() {
   } else if (chartData) {
     drawChart(chartData);
   }
+}
+
+function syncChartFibToggle() {
+  const btn = document.getElementById('charts-fib-toggle');
+  if (!btn) return;
+  btn.classList.toggle('active', chartShowFibs);
+  btn.setAttribute('aria-pressed', chartShowFibs ? 'true' : 'false');
+}
+
+function toggleChartFibs() {
+  chartShowFibs = !chartShowFibs;
+  localStorage.setItem('chartShowFibs', chartShowFibs ? '1' : '0');
+  syncChartFibToggle();
+  if (chartData) drawChart(chartData);
 }
 
 function setupChartCrosshair() {
@@ -1529,6 +1548,7 @@ function drawChart(data) {
   const bodyW = Math.max(2, Math.min(10, chartW / candles.length * 0.62));
   const indexByTime = new Map(candles.map((c, i) => [c.time, i]));
   drawChartChannels(ctx, data.channels || [], indexByTime, x, y);
+  if (chartShowFibs) drawFibRetracements(ctx, data.fibs || [], indexByTime, x, y, pad, w, priceH);
   drawChartLevels(ctx, data.levels || [], y, pad, w, priceH);
   candles.forEach((c, i) => {
     const xx = x(i);
@@ -1769,6 +1789,45 @@ function drawChartChannels(ctx, channels, indexByTime, x, y) {
     ctx.lineTo(x(r1), y(ch.resistanceStartPrice));
     ctx.closePath();
     ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawFibRetracements(ctx, fibs, indexByTime, x, y, pad, w, priceH) {
+  if (!fibs || fibs.length === 0) return;
+  ctx.save();
+  ctx.font = '10px SF Mono, monospace';
+  ctx.lineWidth = 1;
+  for (const fib of fibs) {
+    const fromIdx = indexByTime.get(fib.fromTime);
+    const toIdx = indexByTime.get(fib.toTime);
+    if (fromIdx == null || toIdx == null || !Array.isArray(fib.levels)) continue;
+    const startX = x(fromIdx);
+    const endX = w - pad.right;
+    const labelX = startX + (endX - startX) * 0.35;
+    const color = fib.kind === 'downtrend' ? '88,166,255' : '210,153,34';
+    ctx.strokeStyle = `rgba(${color},.45)`;
+    ctx.fillStyle = `rgba(${color},.85)`;
+    ctx.setLineDash([5, 5]);
+    for (const lvl of fib.levels) {
+      const yy = y(lvl.price);
+      if (yy < pad.top || yy > pad.top + priceH) continue;
+      ctx.beginPath();
+      ctx.moveTo(startX, yy);
+      ctx.lineTo(endX, yy);
+      ctx.stroke();
+      const label = `Fib ${(Number(lvl.ratio || 0) * 100).toFixed(1)}%`;
+      ctx.setLineDash([]);
+      ctx.textAlign = 'center';
+      ctx.fillText(label, labelX, yy - 4);
+      ctx.setLineDash([5, 5]);
+    }
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(${color},.55)`;
+    ctx.beginPath();
+    ctx.moveTo(x(fromIdx), y(fib.fromPrice));
+    ctx.lineTo(x(toIdx), y(fib.toPrice));
+    ctx.stroke();
   }
   ctx.restore();
 }

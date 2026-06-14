@@ -626,6 +626,20 @@ type ChartChannel struct {
 	Touches        int     `json:"touches"`
 }
 
+type ChartFibRetracement struct {
+	Kind      string          `json:"kind"`
+	FromTime  int64           `json:"fromTime"`
+	ToTime    int64           `json:"toTime"`
+	FromPrice float64         `json:"fromPrice"`
+	ToPrice   float64         `json:"toPrice"`
+	Levels    []ChartFibLevel `json:"levels"`
+}
+
+type ChartFibLevel struct {
+	Ratio float64 `json:"ratio"`
+	Price float64 `json:"price"`
+}
+
 type ChartSetup struct {
 	Kind              string  `json:"kind"`
 	Title             string  `json:"title"`
@@ -645,25 +659,26 @@ type ChartAnalysis struct {
 }
 
 type ChartResponse struct {
-	Symbol      string            `json:"symbol"`
-	Range       string            `json:"range"`
-	Interval    string            `json:"interval"`
-	Currency    string            `json:"currency"`
-	Candles     []ChartCandle     `json:"candles"`
-	RSI14       []ChartLinePoint  `json:"rsi14"`
-	SMA50       []ChartLinePoint  `json:"sma50"`
-	SMA100      []ChartLinePoint  `json:"sma100"`
-	SMA200      []ChartLinePoint  `json:"sma200"`
-	MACD        []ChartMACDPoint  `json:"macd"`
-	Pivots      []ChartPivot      `json:"pivots"`
-	Levels      []ChartLevel      `json:"levels"`
-	Divergences []ChartDivergence `json:"divergences"`
-	Channels    []ChartChannel    `json:"channels"`
-	Analysis    ChartAnalysis     `json:"analysis"`
-	Cached      bool              `json:"cached"`
-	Stale       bool              `json:"stale"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
-	ValidUntil  time.Time         `json:"validUntil"`
+	Symbol      string                `json:"symbol"`
+	Range       string                `json:"range"`
+	Interval    string                `json:"interval"`
+	Currency    string                `json:"currency"`
+	Candles     []ChartCandle         `json:"candles"`
+	RSI14       []ChartLinePoint      `json:"rsi14"`
+	SMA50       []ChartLinePoint      `json:"sma50"`
+	SMA100      []ChartLinePoint      `json:"sma100"`
+	SMA200      []ChartLinePoint      `json:"sma200"`
+	MACD        []ChartMACDPoint      `json:"macd"`
+	Pivots      []ChartPivot          `json:"pivots"`
+	Levels      []ChartLevel          `json:"levels"`
+	Divergences []ChartDivergence     `json:"divergences"`
+	Channels    []ChartChannel        `json:"channels"`
+	Fibs        []ChartFibRetracement `json:"fibs"`
+	Analysis    ChartAnalysis         `json:"analysis"`
+	Cached      bool                  `json:"cached"`
+	Stale       bool                  `json:"stale"`
+	UpdatedAt   time.Time             `json:"updatedAt"`
+	ValidUntil  time.Time             `json:"validUntil"`
 }
 
 func chartCacheDir() string {
@@ -824,6 +839,7 @@ func trimChartResponse(cr ChartResponse, displayRange, interval string) ChartRes
 	cr.Divergences = calcRSIDivergences(cr.Candles, cr.Pivots)
 	cr.Divergences = filterDivergencesByContext(cr.Divergences, cr.Candles, cr.SMA50, cr.SMA100, cr.SMA200, cr.Levels)
 	cr.Channels = calcChartChannels(cr.Candles, cr.Pivots)
+	cr.Fibs = calcFibRetracements(cr.Candles, cr.Pivots)
 	cr.Analysis = calcChartAnalysis(cr)
 	return cr
 }
@@ -961,6 +977,7 @@ func enrichChartIndicators(cr *ChartResponse) {
 	if len(cr.Channels) == 0 {
 		cr.Channels = calcChartChannels(cr.Candles, cr.Pivots)
 	}
+	cr.Fibs = calcFibRetracements(cr.Candles, cr.Pivots)
 	cr.Analysis = calcChartAnalysis(*cr)
 }
 
@@ -1409,6 +1426,65 @@ func calcChartChannels(candles []ChartCandle, pivots []ChartPivot) []ChartChanne
 		return nil
 	}
 	return []ChartChannel{*best}
+}
+
+func calcFibRetracements(candles []ChartCandle, pivots []ChartPivot) []ChartFibRetracement {
+	if len(candles) < 60 || len(pivots) < 2 {
+		return nil
+	}
+	lastTime := candles[len(candles)-1].Time
+	const maxEndAge = int64(90 * 24 * time.Hour / time.Second)
+	const maxLegAge = int64(180 * 24 * time.Hour / time.Second)
+
+	var bestFrom, bestTo ChartPivot
+	bestScore := 0.0
+	for i := 0; i < len(pivots)-1; i++ {
+		from := pivots[i]
+		for j := i + 1; j < len(pivots); j++ {
+			to := pivots[j]
+			if from.Kind == to.Kind || to.Time <= from.Time || lastTime-to.Time > maxEndAge || to.Time-from.Time > maxLegAge || from.Price <= 0 || to.Price <= 0 {
+				continue
+			}
+			if (from.Kind == "low" && to.Kind != "high") || (from.Kind == "high" && to.Kind != "low") {
+				continue
+			}
+			move := math.Abs(to.Price-from.Price) / from.Price
+			if move < 0.20 {
+				continue
+			}
+			recency := 1.0 / (1.0 + float64(lastTime-to.Time)/float64(30*24*time.Hour/time.Second))
+			score := move + recency*0.25
+			if score > bestScore {
+				bestFrom = from
+				bestTo = to
+				bestScore = score
+			}
+		}
+	}
+	if bestScore == 0 {
+		return nil
+	}
+
+	diff := bestTo.Price - bestFrom.Price
+	levels := make([]ChartFibLevel, 0, 5)
+	for _, ratio := range []float64{0.236, 0.382, 0.5, 0.618, 0.786} {
+		levels = append(levels, ChartFibLevel{
+			Ratio: ratio,
+			Price: bestTo.Price - diff*ratio,
+		})
+	}
+	kind := "uptrend"
+	if bestTo.Price < bestFrom.Price {
+		kind = "downtrend"
+	}
+	return []ChartFibRetracement{{
+		Kind:      kind,
+		FromTime:  bestFrom.Time,
+		ToTime:    bestTo.Time,
+		FromPrice: bestFrom.Price,
+		ToPrice:   bestTo.Price,
+		Levels:    levels,
+	}}
 }
 
 func chartChannelWindow(candles []ChartCandle, start, end int64) []ChartCandle {
