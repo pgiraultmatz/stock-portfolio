@@ -492,8 +492,9 @@
     .charts-view { max-width: 1480px; margin: 0 auto; padding: 14px 0 34px; }
     .charts-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
     .charts-main { min-width: 0; }
-    .charts-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto auto auto; gap: 10px; align-items: center; margin-bottom: 14px; }
-    .charts-toolbar .search-wrap { max-width: none; width: 100%; }
+    .charts-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: nowrap; }
+    .charts-toolbar .search-wrap { flex: 1 1 260px; max-width: none; width: 100%; min-width: 180px; }
+    .charts-toolbar select, .charts-toolbar .charts-toggle, .charts-toolbar .btn { flex: 0 0 auto; white-space: nowrap; }
     .charts-toolbar input, .charts-toolbar select { min-width: 0; padding: 9px 11px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
     .charts-toolbar input:focus, .charts-toolbar select:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.16); }
     .charts-toggle { padding: 9px 11px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: 12px; font-weight: 800; letter-spacing: .04em; cursor: pointer; }
@@ -524,6 +525,9 @@
     .charts-watchlist { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; position: sticky; top: 110px; max-height: calc(100vh - 132px); display: flex; flex-direction: column; }
     .charts-watch-head { display: grid; grid-template-columns: minmax(0, 1fr) 74px 66px; gap: 10px; align-items: center; padding: 12px 12px 9px; border-bottom: 1px solid #21262d; color: #8b949e; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
     .charts-watch-title { color: #e6edf3; font-size: 14px; font-weight: 700; text-transform: none; letter-spacing: 0; }
+    .charts-watch-filter { padding: 8px 12px; border-bottom: 1px solid #21262d; }
+    .charts-watch-filter input { width: 100%; min-width: 0; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 12px; outline: none; }
+    .charts-watch-filter input:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.16); }
     .charts-watch-body { overflow: auto; }
     .charts-watch-cat { padding: 10px 12px 6px; color: #8b949e; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; background: #0d1117; border-top: 1px solid #161b22; }
     .charts-watch-row { display: grid; grid-template-columns: minmax(0, 1fr) 74px 66px; gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid #161b22; cursor: pointer; color: #c9d1d9; transition: background .12s; }
@@ -544,7 +548,8 @@
     .charts-watch-cat-count { color: #6e7681; font-size: 11px; min-width: 18px; text-align: right; }
     @media (max-width: 720px) {
       .charts-layout { grid-template-columns: 1fr; }
-      .charts-toolbar { grid-template-columns: 1fr 1fr; }
+      .charts-toolbar { flex-wrap: wrap; }
+      .charts-toolbar .search-wrap { flex-basis: 100%; }
       .charts-analysis { grid-template-columns: 1fr; }
       .charts-setup { grid-template-columns: 1fr; }
       .charts-canvas-wrap { height: 760px; }
@@ -880,6 +885,10 @@
             <option value="1d" selected>Daily</option>
             <option value="1wk">Weekly</option>
           </select>
+          <select id="charts-ma-mode" title="Moving average mode">
+            <option value="sma">SMA</option>
+            <option value="ema">EMA</option>
+          </select>
           <button id="charts-fib-toggle" class="charts-toggle active" onclick="toggleChartFibs()" title="Toggle Fibonacci retracements">Fib</button>
           <button class="btn btn-primary" onclick="loadChart()">Load</button>
         </div>
@@ -900,6 +909,9 @@
           <div class="charts-watch-title">Watchlist</div>
           <div style="text-align:right">Last</div>
           <div style="text-align:right">Chg%</div>
+        </div>
+        <div class="charts-watch-filter">
+          <input id="charts-watch-filter" placeholder="Filter watchlist…" autocomplete="off">
         </div>
         <div id="charts-watchlist" class="charts-watch-body"></div>
       </div>
@@ -1358,6 +1370,9 @@ let chartHover = null;
 let chartFrame = null;
 let chartCrosshairReady = false;
 let chartShowFibs = localStorage.getItem('chartShowFibs') !== '0';
+let chartMAMode = localStorage.getItem('chartMAMode') === 'ema' ? 'ema' : 'sma';
+let chartLastSymbol = localStorage.getItem('chartLastSymbol') || 'BTC-USD';
+let chartWatchFilter = localStorage.getItem('chartWatchFilter') || '';
 let collapsedChartCats = new Set(JSON.parse(localStorage.getItem('collapsedChartCats') || '[]'));
 let chartSearchTimer = null;
 let chartSearchAbort = null;
@@ -1365,6 +1380,10 @@ let chartSuggItems = [];
 let chartSuggIdx = -1;
 
 function initChartsView() {
+  syncChartMAMode();
+  const input = document.getElementById('charts-symbol');
+  if (input && (!input.value || input.value === 'BTC-USD')) input.value = chartLastSymbol;
+  setupChartWatchFilter();
   renderChartSymbols();
   renderChartsWatchlist();
   syncChartFibToggle();
@@ -1376,6 +1395,40 @@ function initChartsView() {
   } else if (chartData) {
     drawChart(chartData);
   }
+}
+
+function syncChartMAMode() {
+  const el = document.getElementById('charts-ma-mode');
+  if (!el) return;
+  el.value = chartMAMode;
+  if (el.dataset.ready === '1') return;
+  el.dataset.ready = '1';
+  el.addEventListener('change', () => {
+    chartMAMode = el.value === 'ema' ? 'ema' : 'sma';
+    localStorage.setItem('chartMAMode', chartMAMode);
+    loadChart();
+  });
+}
+
+function setupChartWatchFilter() {
+  const input = document.getElementById('charts-watch-filter');
+  if (!input) return;
+  input.value = chartWatchFilter;
+  if (input.dataset.ready === '1') return;
+  input.dataset.ready = '1';
+  input.addEventListener('input', () => {
+    chartWatchFilter = input.value.trim();
+    localStorage.setItem('chartWatchFilter', chartWatchFilter);
+    renderChartsWatchlist();
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      input.value = '';
+      chartWatchFilter = '';
+      localStorage.removeItem('chartWatchFilter');
+      renderChartsWatchlist();
+    }
+  });
 }
 
 function setupChartSearch() {
@@ -1513,7 +1566,16 @@ function renderChartsWatchlist() {
   if (unassigned.length) groups.push({ name: 'Unassigned', emoji: '', rows: unassigned });
 
   const active = (document.getElementById('charts-symbol')?.value || '').trim().toUpperCase();
-  el.innerHTML = groups.map(g => {
+  const filter = chartWatchFilter.trim().toLowerCase();
+  const visibleGroups = filter ? groups.map(g => {
+    const rows = g.rows.filter(s => chartWatchFilterMatches(s, g.name, filter));
+    return { ...g, rows };
+  }).filter(g => g.rows.length > 0) : groups;
+  if (visibleGroups.length === 0) {
+    el.innerHTML = '<div class="charts-watch-empty">No matching tickers.</div>';
+    return;
+  }
+  el.innerHTML = visibleGroups.map(g => {
     const avg = chartCategoryAvgChange(g.rows);
     const avgCls = avg == null ? '' : avg >= 0 ? 'charts-watch-up' : 'charts-watch-down';
     const avgText = avg == null ? '—' : `${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%`;
@@ -1526,6 +1588,14 @@ function renderChartsWatchlist() {
     </div>
     ${collapsedChartCats.has(g.name) ? '' : g.rows.map(s => renderChartsWatchRow(s, active)).join('')}
   `}).join('');
+}
+
+function chartWatchFilterMatches(stock, category, filter) {
+  const haystack = [
+    stock.ticker,
+    stock.name,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(filter);
 }
 
 function toggleChartCategory(name) {
@@ -1576,19 +1646,24 @@ async function loadChart() {
   const symbolEl = document.getElementById('charts-symbol');
   const rangeEl = document.getElementById('charts-range');
   const intervalEl = document.getElementById('charts-interval');
+  const maModeEl = document.getElementById('charts-ma-mode');
   const meta = document.getElementById('charts-meta');
   const empty = document.getElementById('charts-empty');
   const symbol = (symbolEl?.value || 'BTC-USD').trim().toUpperCase();
   const range = rangeEl?.value || '1y';
   const interval = intervalEl?.value || '1d';
+  chartMAMode = maModeEl?.value === 'ema' ? 'ema' : 'sma';
+  localStorage.setItem('chartMAMode', chartMAMode);
   if (!symbol) return;
   if (symbolEl) symbolEl.value = symbol;
+  chartLastSymbol = symbol;
+  localStorage.setItem('chartLastSymbol', symbol);
   chartHover = null;
   document.getElementById('charts-title').textContent = symbol;
   if (meta) meta.textContent = 'Loading…';
   if (empty) empty.style.display = 'grid';
   try {
-    const res = await fetch(`/api/charts?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`);
+    const res = await fetch(`/api/charts?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&ma=${encodeURIComponent(chartMAMode)}`);
     if (!res.ok) throw new Error(await res.text());
     chartData = await res.json();
     renderChartsWatchlist();
@@ -1605,6 +1680,11 @@ function drawChart(data) {
   if (!canvas || !data || !data.candles || data.candles.length === 0) return;
   if (empty) empty.style.display = 'none';
   renderChartAnalysis(data);
+  const maMode = data.maMode === 'ema' ? 'ema' : 'sma';
+  const maLabel = maMode.toUpperCase();
+  const ma50 = maMode === 'ema' ? (data.ema50 || []) : (data.sma50 || []);
+  const ma100 = maMode === 'ema' ? (data.ema100 || []) : (data.sma100 || []);
+  const ma200 = maMode === 'ema' ? (data.ema200 || []) : (data.sma200 || []);
   const wrap = canvas.parentElement;
   const dpr = window.devicePixelRatio || 1;
   const w = Math.max(320, wrap.clientWidth);
@@ -1655,8 +1735,12 @@ function drawChart(data) {
   const bodyW = Math.max(2, Math.min(10, chartW / candles.length * 0.62));
   const indexByTime = new Map(candles.map((c, i) => [c.time, i]));
   drawChartChannels(ctx, data.channels || [], indexByTime, x, y);
-  if (chartShowFibs) drawFibRetracements(ctx, data.fibs || [], indexByTime, x, y, pad, w, priceH);
-  drawChartLevels(ctx, data.levels || [], y, pad, w, priceH);
+  drawChartCompressions(ctx, data.compressions || [], indexByTime, x, y);
+  if (chartShowFibs) {
+    drawFibRetracements(ctx, data.fibs || [], indexByTime, x, y, pad, w, priceH);
+  } else {
+    drawChartLevels(ctx, data.levels || [], y, pad, w, priceH);
+  }
   candles.forEach((c, i) => {
     const xx = x(i);
     const color = c.close >= c.open ? '#3fb950' : '#f85149';
@@ -1673,9 +1757,9 @@ function drawChart(data) {
     ctx.fillRect(xx - bodyW / 2, top, bodyW, bh);
   });
 
-  drawMovingAverage(ctx, data.sma50 || [], indexByTime, x, y, '#58a6ff', 'SMA 50', pad.left, pad.top + 12);
-  drawMovingAverage(ctx, data.sma100 || [], indexByTime, x, y, '#d29922', 'SMA 100', pad.left + 76, pad.top + 12);
-  drawMovingAverage(ctx, data.sma200 || [], indexByTime, x, y, '#db61a2', 'SMA 200', pad.left + 160, pad.top + 12);
+  drawMovingAverage(ctx, ma50, indexByTime, x, y, '#58a6ff', `${maLabel} 50`, pad.left, pad.top + 12);
+  drawMovingAverage(ctx, ma100, indexByTime, x, y, '#d29922', `${maLabel} 100`, pad.left + 76, pad.top + 12);
+  drawMovingAverage(ctx, ma200, indexByTime, x, y, '#db61a2', `${maLabel} 200`, pad.left + 160, pad.top + 12);
   drawChartDivergences(ctx, data.divergences || [], indexByTime, x, y);
   drawChartDateAxis(ctx, candles, pad, w, dateAxisTop, dateAxisH);
   drawVolumePanel(ctx, candles, x, bodyW, pad, w, volumeTop, volumeH);
@@ -1689,9 +1773,9 @@ function drawChart(data) {
   const latestRSI = data.rsi14 && data.rsi14.length ? data.rsi14[data.rsi14.length - 1].value : null;
   const latestMACD = data.macd && data.macd.length ? data.macd[data.macd.length - 1] : null;
   const latestSMA = [
-    ['SMA50', data.sma50],
-    ['SMA100', data.sma100],
-    ['SMA200', data.sma200],
+    [`${maLabel}50`, ma50],
+    [`${maLabel}100`, ma100],
+    [`${maLabel}200`, ma200],
   ].filter(([, s]) => s && s.length).map(([label, s]) => `${label} ${formatChartPrice(s[s.length - 1].value, data.currency)}`).join(' · ');
   const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleString('fr-FR') : '';
   const cacheLabel = data.cached ? (data.stale ? 'stale cache' : 'cache') : 'fresh';
@@ -1716,6 +1800,7 @@ function renderChartAnalysis(data) {
     const setupBias = (s.bias || '').toLowerCase();
     const biasCls = setupBias.includes('bullish') ? 'bullish' : setupBias.includes('bearish') ? 'bearish' : '';
     const levels = [
+      s.triggerTime ? formatChartDate(s.triggerTime) : '',
       s.triggerPrice ? `trigger ${formatChartPrice(s.triggerPrice, data.currency)}` : '',
       s.invalidationPrice ? `invalid ${formatChartPrice(s.invalidationPrice, data.currency)}` : '',
       s.confidence ? s.confidence : '',
@@ -1894,6 +1979,40 @@ function drawChartChannels(ctx, channels, indexByTime, x, y) {
     ctx.lineTo(x(s2), y(ch.supportEndPrice));
     ctx.lineTo(x(r2), y(ch.resistanceEndPrice));
     ctx.lineTo(x(r1), y(ch.resistanceStartPrice));
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawChartCompressions(ctx, compressions, indexByTime, x, y) {
+  if (!compressions || compressions.length === 0) return;
+  ctx.save();
+  for (const cp of compressions) {
+    const s1 = indexByTime.get(cp.supportStart);
+    const s2 = indexByTime.get(cp.supportEnd);
+    const r1 = indexByTime.get(cp.resistanceStart);
+    const r2 = indexByTime.get(cp.resistanceEnd);
+    if (s1 == null || s2 == null || r1 == null || r2 == null) continue;
+    const color = '#58a6ff';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x(s1), y(cp.supportStartPrice));
+    ctx.lineTo(x(s2), y(cp.supportEndPrice));
+    ctx.moveTo(x(r1), y(cp.resistanceStartPrice));
+    ctx.lineTo(x(r2), y(cp.resistanceEndPrice));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.1;
+    ctx.beginPath();
+    ctx.moveTo(x(s1), y(cp.supportStartPrice));
+    ctx.lineTo(x(s2), y(cp.supportEndPrice));
+    ctx.lineTo(x(r2), y(cp.resistanceEndPrice));
+    ctx.lineTo(x(r1), y(cp.resistanceStartPrice));
     ctx.closePath();
     ctx.fill();
   }
@@ -2126,6 +2245,7 @@ function drawMACDPanel(ctx, macd, candles, x, bodyW, pad, w, top, height) {
 
   drawIndicatorLine(ctx, macd, indexByTime, x, y, p => p.macd, '#58a6ff');
   drawIndicatorLine(ctx, macd, indexByTime, x, y, p => p.signal, '#d29922');
+  drawMACDEventMarkers(ctx, macd, indexByTime, x, y, zeroY);
   ctx.fillStyle = '#58a6ff';
   ctx.textAlign = 'left';
   ctx.fillText('MACD', pad.left + 98, top + 12);
@@ -2135,6 +2255,53 @@ function drawMACDPanel(ctx, macd, candles, x, bodyW, pad, w, top, height) {
   ctx.fillText(formatIndicator(maxAbs), w - pad.right + 8, top + 14);
   ctx.fillText('0', w - pad.right + 8, zeroY + 4);
   ctx.fillText(formatIndicator(-maxAbs), w - pad.right + 8, bottom);
+}
+
+function drawMACDEventMarkers(ctx, macd, indexByTime, x, y, zeroY) {
+  if (!macd || macd.length < 4) return;
+  ctx.save();
+  for (let i = 3; i < macd.length; i++) {
+    const p = macd[i];
+    const p1 = macd[i - 1];
+    const p2 = macd[i - 2];
+    const idx = indexByTime.get(p.time);
+    if (idx == null) continue;
+    const xx = x(idx);
+    if (p1.histogram <= 0 && p.histogram > 0) {
+      drawMACDTriangle(ctx, xx, zeroY - 12, '#3fb950', 'up');
+      continue;
+    }
+    if (p1.histogram >= 0 && p.histogram < 0) {
+      drawMACDTriangle(ctx, xx, zeroY + 12, '#f85149', 'down');
+      continue;
+    }
+    const recoveringBelowZero = p.histogram > p1.histogram && p1.histogram > p2.histogram && p.histogram < 0;
+    const fadingAboveZero = p.histogram < p1.histogram && p1.histogram < p2.histogram && p.histogram > 0;
+    if (recoveringBelowZero || fadingAboveZero) {
+      ctx.fillStyle = recoveringBelowZero ? '#58a6ff' : '#d29922';
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.arc(xx, y(p.histogram), 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawMACDTriangle(ctx, x, y, color, dir) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  if (dir === 'up') {
+    ctx.moveTo(x, y - 5);
+    ctx.lineTo(x - 5, y + 4);
+    ctx.lineTo(x + 5, y + 4);
+  } else {
+    ctx.moveTo(x, y + 5);
+    ctx.lineTo(x - 5, y - 4);
+    ctx.lineTo(x + 5, y - 4);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawIndicatorLine(ctx, points, indexByTime, x, y, valueOf, color) {
