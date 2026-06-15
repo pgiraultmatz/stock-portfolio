@@ -1688,6 +1688,8 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		}
 	}
 
+	setups = append(setups, calcVolumeMACDSetups(candles, cr.MACD, last, prev, latestSMA50, hasSMA50)...)
+
 	if ch, ok := latestChartChannel(cr.Channels); ok {
 		chTop := ch.ResEndPx
 		chBottom := ch.SupportEndPx
@@ -1823,6 +1825,112 @@ func chartRecentLow(candles []ChartCandle) float64 {
 	return low
 }
 
+func calcVolumeMACDSetups(candles []ChartCandle, macd []ChartMACDPoint, last, prev ChartCandle, sma50 float64, hasSMA50 bool) []ChartSetup {
+	var setups []ChartSetup
+	if len(candles) < 25 {
+		return setups
+	}
+	avgVol := chartAvgVolume(candles, 20)
+	highVolume := avgVol > 0 && float64(last.Volume) >= avgVol*1.6
+	priceChange := 0.0
+	if prev.Close > 0 {
+		priceChange = (last.Close - prev.Close) / prev.Close
+	}
+	if highVolume && priceChange >= 0.03 {
+		setups = append(setups, ChartSetup{
+			Kind:            "high_volume_bullish_reversal",
+			Title:           "High-volume bullish reversal",
+			Bias:            "bullish",
+			Confidence:      "watch",
+			Detail:          "Price closed higher on volume well above its recent average.",
+			TriggerPrice:    last.High,
+			PositiveOutcome: "Follow-through above the high confirms buyers are absorbing supply.",
+			NegativeOutcome: "No follow-through after high volume can mark exhaustion instead of accumulation.",
+		})
+	}
+	if highVolume && priceChange <= -0.03 {
+		setups = append(setups, ChartSetup{
+			Kind:              "high_volume_selloff",
+			Title:             "High-volume sell-off",
+			Bias:              "bearish",
+			Confidence:        "watch",
+			Detail:            "Price sold off on volume well above its recent average.",
+			TriggerPrice:      last.High,
+			InvalidationPrice: last.High,
+			PositiveOutcome:   "A quick reclaim of the sell-off candle high would reduce downside pressure.",
+			NegativeOutcome:   "Staying below the sell-off candle keeps distribution risk elevated.",
+		})
+	}
+	if len(macd) >= 4 {
+		m0 := macd[len(macd)-1]
+		m1 := macd[len(macd)-2]
+		m2 := macd[len(macd)-3]
+		if m0.Histogram > m1.Histogram && m1.Histogram > m2.Histogram && m0.Histogram < 0 {
+			setups = append(setups, ChartSetup{
+				Kind:              "macd_momentum_recovery",
+				Title:             "MACD momentum recovery",
+				Bias:              "bullish if price confirms",
+				Confidence:        "watch",
+				Detail:            "MACD histogram is improving while still below zero, suggesting downside momentum is fading.",
+				TriggerPrice:      last.High,
+				InvalidationPrice: last.Low,
+				PositiveOutcome:   "A price reclaim with improving MACD supports a rebound attempt.",
+				NegativeOutcome:   "A new low while MACD remains negative keeps the trend fragile.",
+			})
+		}
+		if m0.Histogram < m1.Histogram && m1.Histogram < m2.Histogram && m0.Histogram > 0 {
+			setups = append(setups, ChartSetup{
+				Kind:              "macd_momentum_fading",
+				Title:             "MACD momentum fading",
+				Bias:              "bearish warning",
+				Confidence:        "watch",
+				Detail:            "MACD histogram is falling while still above zero, suggesting upside momentum is fading.",
+				TriggerPrice:      last.High,
+				InvalidationPrice: last.High,
+				PositiveOutcome:   "A renewed histogram expansion would confirm trend continuation.",
+				NegativeOutcome:   "Price weakness with fading MACD increases pullback risk.",
+			})
+		}
+		if m1.Histogram <= 0 && m0.Histogram > 0 && (!hasSMA50 || last.Close >= sma50) {
+			setups = append(setups, ChartSetup{
+				Kind:              "macd_bullish_cross",
+				Title:             "MACD bullish turn",
+				Bias:              "bullish",
+				Confidence:        "medium",
+				Detail:            "MACD histogram crossed back above zero with price holding its trend area.",
+				TriggerPrice:      last.High,
+				InvalidationPrice: last.Low,
+				PositiveOutcome:   "Holding above the signal turn can support trend continuation.",
+				NegativeOutcome:   "A failed MACD turn raises false-reversal risk.",
+			})
+		}
+	}
+	return setups
+}
+
+func chartAvgVolume(candles []ChartCandle, period int) float64 {
+	if period <= 0 || len(candles) == 0 {
+		return 0
+	}
+	start := maxInt(0, len(candles)-period-1)
+	end := len(candles) - 1
+	if start >= end {
+		return 0
+	}
+	var sum float64
+	var count int
+	for _, c := range candles[start:end] {
+		if c.Volume > 0 {
+			sum += float64(c.Volume)
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
+}
+
 func nearestSupportLevel(levels []ChartLevel, lastClose float64) (ChartLevel, bool) {
 	if lastClose <= 0 {
 		return ChartLevel{}, false
@@ -1911,6 +2019,10 @@ func chartSetupPriority(setup ChartSetup) int {
 		return 30
 	case "channel_breakout_retest":
 		return 40
+	case "high_volume_bullish_reversal", "high_volume_selloff", "macd_bullish_cross":
+		return 45
+	case "macd_momentum_recovery", "macd_momentum_fading":
+		return 55
 	case "channel_breakout", "channel_breakdown":
 		return 60
 	case "inside_channel":
@@ -2005,7 +2117,9 @@ func chartAnalysisBias(setups []ChartSetup, lastClose, sma50 float64, hasSMA50 b
 		if strings.Contains(s.Bias, "bullish") {
 			score += 2
 		}
-		if strings.Contains(s.Bias, "bearish") {
+		if strings.Contains(s.Bias, "bearish warning") {
+			score--
+		} else if strings.Contains(s.Bias, "bearish") {
 			score -= 2
 		}
 		if strings.Contains(s.Kind, "retest") || strings.Contains(s.Kind, "pullback") {

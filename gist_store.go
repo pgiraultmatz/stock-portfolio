@@ -30,10 +30,20 @@ type StockFundamentals struct {
 	SignalNote    string  `json:"signal_note,omitempty"`
 }
 
+// MacroEvent mirrors macro_events entries written by stock-checker.
+type MacroEvent struct {
+	Name       string    `json:"name"`
+	Date       time.Time `json:"date"`
+	Category   string    `json:"category"`
+	Source     string    `json:"source"`
+	Importance string    `json:"importance"`
+}
+
 // StockDataFile mirrors the stock-data.json written by stock-checker.
 type StockDataFile struct {
-	UpdatedAt time.Time                    `json:"updated_at"`
-	Stocks    map[string]StockFundamentals `json:"stocks"`
+	UpdatedAt   time.Time                    `json:"updated_at"`
+	Stocks      map[string]StockFundamentals `json:"stocks"`
+	MacroEvents []MacroEvent                 `json:"macro_events,omitempty"`
 }
 
 type GistStore struct {
@@ -473,10 +483,10 @@ func (s *GistStore) GetUserByGoogleID(_ context.Context, _ string) (*User, error
 	return nil, ErrNotFound
 }
 
-func (s *GistStore) CreateUser(_ context.Context, _ *User) error        { return nil }
-func (s *GistStore) VerifyUser(_ context.Context, _ string) error        { return nil }
-func (s *GistStore) LinkGoogleID(_ context.Context, _, _ string) error   { return nil }
-func (s *GistStore) DeleteUser(_ context.Context, _ *User) error         { return nil }
+func (s *GistStore) CreateUser(_ context.Context, _ *User) error       { return nil }
+func (s *GistStore) VerifyUser(_ context.Context, _ string) error      { return nil }
+func (s *GistStore) LinkGoogleID(_ context.Context, _, _ string) error { return nil }
+func (s *GistStore) DeleteUser(_ context.Context, _ *User) error       { return nil }
 
 func (s *GistStore) UpdateUser(_ context.Context, _, _, _ string) error { return nil }
 

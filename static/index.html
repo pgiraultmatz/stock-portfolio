@@ -79,6 +79,10 @@
     .cal-date { width: 110px; flex-shrink: 0; font-family: 'SF Mono', monospace; font-size: 12px; white-space: nowrap; }
     .cal-name { flex: 1; color: #c9d1d9; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cal-ticker { font-family: 'SF Mono', monospace; font-size: 11px; color: #8b949e; }
+    .cal-type { font-size: 10px; font-weight: 700; font-family: 'SF Mono', monospace; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; flex-shrink: 0; }
+    .cal-type-earnings { color: #d29922; background: rgba(210,153,34,0.12); }
+    .cal-type-macro { color: #58a6ff; background: rgba(88,166,255,0.12); }
+    .cal-source { font-size: 11px; color: #6e7681; margin-left: 8px; }
     .cal-signal { font-size: 11px; font-family: 'SF Mono', monospace; flex-shrink: 0; font-weight: 700; }
     .cal-empty { font-size: 12px; color: #484f58; padding: 24px 0; text-align: center; }
     .cal-reminder {
@@ -489,6 +493,7 @@
     .charts-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
     .charts-main { min-width: 0; }
     .charts-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto auto auto; gap: 10px; align-items: center; margin-bottom: 14px; }
+    .charts-toolbar .search-wrap { max-width: none; width: 100%; }
     .charts-toolbar input, .charts-toolbar select { min-width: 0; padding: 9px 11px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
     .charts-toolbar input:focus, .charts-toolbar select:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.16); }
     .charts-toggle { padding: 9px 11px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: 12px; font-weight: 800; letter-spacing: .04em; cursor: pointer; }
@@ -560,8 +565,8 @@
     .stock-row.insert-after  { border-bottom: 2px solid #388bfd !important; }
     .stock-row.filter-match  { background: #1c2d3a !important; outline: 1px solid #388bfd; border-radius: 4px; }
     .drag-handle { color: #30363d; font-size: 13px; margin-right: 8px; user-select: none; }
-    .stock-name   { font-size: 13px; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; flex-shrink: 0; }
-    .stock-ticker { font-size: 12px; font-weight: 400; color: #8b949e; font-family: 'SF Mono', monospace; text-decoration: none; }
+    .stock-name   { font-size: 13px; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; flex-shrink: 1; }
+    .stock-ticker { font-size: 13px; font-weight: 700; color: #c9d1d9; font-family: 'SF Mono', monospace; text-decoration: none; margin-right: 8px; flex-shrink: 0; }
     .stock-ticker:hover { color: #79c0ff; text-decoration: underline; }
     .empty-cat { padding: 8px 0 8px 28px; font-size: 12px; color: #484f58; }
     /* ---- stock detail (expandable) ---- */
@@ -858,8 +863,10 @@
     <div class="charts-layout">
       <div class="charts-main">
         <div class="charts-toolbar">
-          <input id="charts-symbol" list="charts-symbols" placeholder="Ticker, e.g. BTC-USD" value="BTC-USD" autocomplete="off">
-          <datalist id="charts-symbols"></datalist>
+          <div class="search-wrap">
+            <input id="charts-symbol" class="search-input" placeholder="Search ticker or company…" value="BTC-USD" autocomplete="off">
+            <div class="suggestions" id="charts-suggestions"></div>
+          </div>
           <select id="charts-range">
             <option value="1mo">1M</option>
             <option value="3mo">3M</option>
@@ -1177,6 +1184,7 @@ let portfolio = { stocks: [], categories: [] };
 let xGroups = [];
 let dirty = false;
 let metrics = {}; // ticker → StockMetrics
+let macroEvents = [];
 let collapsedCats = new Set(JSON.parse(localStorage.getItem('collapsedCats') || '[]'));
 let expandedStocks = new Set(JSON.parse(localStorage.getItem('expandedStocks') || '[]'));
 
@@ -1230,16 +1238,25 @@ function renderCalendar() {
       dt = d;
     }
     if (isNaN(d) || d < today) continue;
-    entries.push({ s, m, d, dt });
+    entries.push({ type: 'earnings', s, m, d, dt });
+  }
+
+  for (const event of macroEvents) {
+    if (!event || !event.date) continue;
+    const dt = new Date(event.date);
+    if (isNaN(dt)) continue;
+    const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    if (d < today) continue;
+    entries.push({ type: 'macro', event, d, dt });
   }
 
   if (entries.length === 0) {
-    el.innerHTML = '<p class="cal-empty">No upcoming earnings — metrics not loaded yet or none scheduled.</p>';
+    el.innerHTML = '<p class="cal-empty">No upcoming earnings or macro events — data not loaded yet or none scheduled.</p>';
     return;
   }
 
-  // Sort by date
-  entries.sort((a, b) => a.d - b.d);
+  // Sort by date/time
+  entries.sort((a, b) => a.dt - b.dt);
 
   const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
   const fmt = d => d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
@@ -1278,14 +1295,26 @@ function renderCalendar() {
   for (const group of orderedGroups) {
     const sep = !group.special && prevSpecial ? ' style="margin-top:28px"' : '';
     html += `<div class="cal-month"${sep}><div class="cal-month-title">${esc(group.label)}</div>`;
-    for (const { s, m, d, dt } of group.rows) {
+    for (const entry of group.rows) {
+      const { s, m, d, dt, event } = entry;
       const dateLabel = fmt(d);
+      if (entry.type === 'macro') {
+        const timeLabel = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+        const source = [event.category, event.source].filter(Boolean).join(' · ');
+        html += `<div class="cal-row">
+          <span class="cal-date earnings-soon">${esc(dateLabel)} <span style="font-size:10px;color:#8b949e">${timeLabel}</span></span>
+          <span class="cal-type cal-type-macro">Macro</span>
+          <span class="cal-name" title="${esc(event.name)}">${esc(event.name)}${source ? `<span class="cal-source">${esc(source)}</span>` : ''}</span>
+        </div>`;
+        continue;
+      }
       const hasTime = m.earningsDate.includes('T') && dt.getHours() + dt.getMinutes() > 0;
       const timeLabel = hasTime ? dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }) : '';
       const sigCls = m.signalNote === 'WAIT EARNINGS' ? 'signal-light-trim' : (m.signalClass || '');
       const sigTxt = m.signal ? `${m.signal}${m.signalNote ? ` (${esc(m.signalNote)})` : ''}` : '';
       html += `<div class="cal-row">
         <span class="cal-date ${m.earningsClass}">${esc(dateLabel)}${timeLabel ? ` <span style="font-size:10px;color:#8b949e">${timeLabel}</span>` : ''}</span>
+        <span class="cal-type cal-type-earnings">Earnings</span>
         <span class="cal-name" title="${esc(s.name)}">${esc(s.name)} <span class="cal-ticker">${esc(s.ticker)}</span></span>
         <span style="flex:1"></span>
         ${sigTxt ? `<span class="cal-signal ${sigCls}" style="margin-right:12px">${sigTxt}</span>` : ''}
@@ -1330,11 +1359,16 @@ let chartFrame = null;
 let chartCrosshairReady = false;
 let chartShowFibs = localStorage.getItem('chartShowFibs') !== '0';
 let collapsedChartCats = new Set(JSON.parse(localStorage.getItem('collapsedChartCats') || '[]'));
+let chartSearchTimer = null;
+let chartSearchAbort = null;
+let chartSuggItems = [];
+let chartSuggIdx = -1;
 
 function initChartsView() {
   renderChartSymbols();
   renderChartsWatchlist();
   syncChartFibToggle();
+  setupChartSearch();
   setupChartCrosshair();
   if (!chartLoadedOnce) {
     chartLoadedOnce = true;
@@ -1342,6 +1376,79 @@ function initChartsView() {
   } else if (chartData) {
     drawChart(chartData);
   }
+}
+
+function setupChartSearch() {
+  const input = document.getElementById('charts-symbol');
+  const sugg = document.getElementById('charts-suggestions');
+  if (!input || !sugg || input.dataset.ready === '1') return;
+  input.dataset.ready = '1';
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (chartSearchAbort) { chartSearchAbort.abort(); chartSearchAbort = null; }
+    clearTimeout(chartSearchTimer);
+    chartSuggIdx = -1;
+    if (q.length < 1) { sugg.style.display = 'none'; return; }
+    chartSearchTimer = setTimeout(async () => {
+      const ctrl = new AbortController();
+      chartSearchAbort = ctrl;
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
+        const data = await res.json();
+        const results = (data.quotes || []).filter(q => q.quoteType !== 'OPTION' && q.quoteType !== 'FUTURE' && q.symbol);
+        if (results.length === 0) {
+          sugg.innerHTML = '<div class="sugg-item" style="color:#484f58;cursor:default">No results</div>';
+          chartSuggItems = [];
+        } else {
+          sugg.innerHTML = results.map(q => `<div class="sugg-item" data-symbol="${esc(q.symbol)}">
+            <span class="sugg-sym">${esc(q.symbol)}</span>
+            <span class="sugg-name">${esc(q.longname || q.shortname || '')}</span>
+            <span class="sugg-type">${esc(q.quoteType || '')}</span>
+          </div>`).join('');
+          chartSuggItems = Array.from(sugg.querySelectorAll('.sugg-item[data-symbol]'));
+          chartSuggItems.forEach(item => {
+            item.addEventListener('mousedown', e => {
+              e.preventDefault();
+              pickChartSymbol(item.dataset.symbol);
+            });
+          });
+        }
+        sugg.style.display = 'block';
+      } catch (e) {
+        if (e.name !== 'AbortError') console.error(e);
+      }
+    }, 240);
+  });
+  input.addEventListener('keydown', e => {
+    if (sugg.style.display !== 'none' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      chartSuggIdx += e.key === 'ArrowDown' ? 1 : -1;
+      chartSuggIdx = Math.max(-1, Math.min(chartSuggIdx, chartSuggItems.length - 1));
+      highlightChartSugg();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const item = chartSuggIdx >= 0 ? chartSuggItems[chartSuggIdx] : null;
+      if (item) pickChartSymbol(item.dataset.symbol);
+      else loadChart();
+    } else if (e.key === 'Escape') {
+      sugg.style.display = 'none';
+      chartSuggIdx = -1;
+    }
+  });
+}
+
+function highlightChartSugg() {
+  chartSuggItems.forEach((el, i) => el.classList.toggle('active', i === chartSuggIdx));
+  if (chartSuggIdx >= 0) chartSuggItems[chartSuggIdx].scrollIntoView({ block: 'nearest' });
+}
+
+function pickChartSymbol(symbol) {
+  const input = document.getElementById('charts-symbol');
+  const sugg = document.getElementById('charts-suggestions');
+  if (input) input.value = symbol;
+  if (sugg) sugg.style.display = 'none';
+  chartSuggIdx = -1;
+  loadChart();
 }
 
 function syncChartFibToggle() {
@@ -2150,6 +2257,7 @@ async function load() {
   renderChartsWatchlist();
   fetchQuotes();
   fetchMetrics();
+  fetchMacroEvents();
   if (!quotesTimer) {
     quotesTimer = setInterval(() => fetchQuotes(true), 5 * 60 * 1000);
   }
@@ -2157,6 +2265,7 @@ async function load() {
 
 // ---- metrics ----
 const METRICS_CACHE_KEY = 'metricsCache';
+const MACRO_EVENTS_CACHE_KEY = 'macroEventsCache';
 const METRICS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 async function fetchMetrics() {
@@ -2173,6 +2282,23 @@ async function fetchMetrics() {
     metrics = await res.json();
     localStorage.setItem(METRICS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: metrics }));
     render();
+    renderCalendar();
+  } catch (e) { /* silent */ }
+}
+
+async function fetchMacroEvents() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(MACRO_EVENTS_CACHE_KEY) || 'null');
+    if (cached && Date.now() - cached.ts < METRICS_CACHE_TTL) {
+      macroEvents = Array.isArray(cached.data) ? cached.data : [];
+      renderCalendar();
+      return;
+    }
+    const res = await fetch('/api/stock-data');
+    if (!res.ok) return;
+    const data = await res.json();
+    macroEvents = Array.isArray(data.macro_events) ? data.macro_events : [];
+    localStorage.setItem(MACRO_EVENTS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: macroEvents }));
     renderCalendar();
   } catch (e) { /* silent */ }
 }
@@ -2304,7 +2430,8 @@ function stockRowHTML(s) {
 <div class="stock-row" draggable="true" data-ticker="${esc(s.ticker)}">
   <span class="drag-handle">⠿</span>
   <button class="sq-toggle${expanded ? ' open' : ''}" data-expand-ticker="${esc(s.ticker)}" draggable="false">${expanded ? '▾' : '▸'}</button>
-  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)} <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker.replace(/-USD$/i, 'USD'))}" target="_blank" rel="noopener" draggable="false">(${esc(s.ticker)})</a></span>
+  <a class="stock-ticker" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.ticker.replace(/-USD$/i, 'USD'))}" target="_blank" rel="noopener" draggable="false">${esc(s.ticker)}</a>
+  <span class="stock-name" title="${esc(s.name)}">${esc(s.name)}</span>
   <span class="stock-quote" data-quote-ticker="${esc(s.ticker)}"></span>
   ${convictionHTML(s)}
   ${stockPriorityHTML(s.ticker)}
@@ -2783,6 +2910,8 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.search-wrap')) {
     sugg.style.display = 'none';
     suggIdx = -1;
+    document.getElementById('charts-suggestions')?.style.setProperty('display', 'none');
+    chartSuggIdx = -1;
   }
 });
 
