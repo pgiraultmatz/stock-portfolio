@@ -1653,59 +1653,126 @@ func calcFibRetracements(candles []ChartCandle, pivots []ChartPivot) []ChartFibR
 	if len(candles) < 60 || len(pivots) < 2 {
 		return nil
 	}
+
 	lastTime := candles[len(candles)-1].Time
+
 	const maxEndAge = int64(90 * 24 * time.Hour / time.Second)
 	const maxLegAge = int64(180 * 24 * time.Hour / time.Second)
 
-	var bestFrom, bestTo ChartPivot
-	bestScore := 0.0
+	type fibCandidate struct {
+		from ChartPivot
+		to   ChartPivot
+		kind string
+		move float64
+	}
+
+	var selected fibCandidate
+	hasSelected := false
+
 	for i := 0; i < len(pivots)-1; i++ {
 		from := pivots[i]
+
 		for j := i + 1; j < len(pivots); j++ {
 			to := pivots[j]
-			if from.Kind == to.Kind || to.Time <= from.Time || lastTime-to.Time > maxEndAge || to.Time-from.Time > maxLegAge || from.Price <= 0 || to.Price <= 0 {
+
+			if from.Kind == to.Kind ||
+				to.Time <= from.Time ||
+				to.Time > lastTime ||
+				lastTime-to.Time > maxEndAge ||
+				to.Time-from.Time > maxLegAge ||
+				from.Price <= 0 ||
+				to.Price <= 0 {
 				continue
 			}
-			if (from.Kind == "low" && to.Kind != "high") || (from.Kind == "high" && to.Kind != "low") {
+
+			var kind string
+
+			switch {
+			case from.Kind == "low" &&
+				to.Kind == "high" &&
+				to.Price > from.Price:
+				kind = "uptrend"
+
+			case from.Kind == "high" &&
+				to.Kind == "low" &&
+				to.Price < from.Price:
+				kind = "downtrend"
+
+			default:
 				continue
 			}
+
 			move := math.Abs(to.Price-from.Price) / from.Price
+
 			if move < 0.20 {
 				continue
 			}
-			recency := 1.0 / (1.0 + float64(lastTime-to.Time)/float64(30*24*time.Hour/time.Second))
-			score := move + recency*0.25
-			if score > bestScore {
-				bestFrom = from
-				bestTo = to
-				bestScore = score
+
+			// Priorité au swing dont le second pivot est le plus récent.
+			// En cas d’égalité, priorité à la plus grande variation relative.
+			if !hasSelected ||
+				to.Time > selected.to.Time ||
+				(to.Time == selected.to.Time && move > selected.move) {
+
+				selected = fibCandidate{
+					from: from,
+					to:   to,
+					kind: kind,
+					move: move,
+				}
+
+				hasSelected = true
 			}
 		}
 	}
-	if bestScore == 0 {
+
+	if !hasSelected {
 		return nil
 	}
 
-	diff := bestTo.Price - bestFrom.Price
-	levels := make([]ChartFibLevel, 0, 5)
-	for _, ratio := range []float64{0.236, 0.382, 0.5, 0.618, 0.786} {
+	levels := make([]ChartFibLevel, 0, 8)
+
+	for _, ratio := range []float64{
+		0,
+		0.236,
+		0.382,
+		0.5,
+		0.618,
+		0.786,
+		1,
+		1.618,
+	} {
+		/*
+			Convention utilisée :
+
+			ratio 0     = deuxième point
+			ratio 1     = premier point
+			ratio 1.618 = extension au-delà du premier point
+
+			Pour high → low :
+			0     = low
+			1     = high
+			1.618 = au-dessus du high
+		*/
+		price := selected.to.Price +
+			(selected.from.Price-selected.to.Price)*ratio
+
 		levels = append(levels, ChartFibLevel{
 			Ratio: ratio,
-			Price: bestTo.Price - diff*ratio,
+			Price: price,
 		})
 	}
-	kind := "uptrend"
-	if bestTo.Price < bestFrom.Price {
-		kind = "downtrend"
+
+	return []ChartFibRetracement{
+		{
+			Kind:      selected.kind,
+			FromTime:  selected.from.Time,
+			ToTime:    selected.to.Time,
+			FromPrice: selected.from.Price,
+			ToPrice:   selected.to.Price,
+			Levels:    levels,
+		},
 	}
-	return []ChartFibRetracement{{
-		Kind:      kind,
-		FromTime:  bestFrom.Time,
-		ToTime:    bestTo.Time,
-		FromPrice: bestFrom.Price,
-		ToPrice:   bestTo.Price,
-		Levels:    levels,
-	}}
 }
 
 func chartChannelWindow(candles []ChartCandle, start, end int64) []ChartCandle {

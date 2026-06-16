@@ -1710,8 +1710,11 @@ function drawChart(data) {
   const volumeTop = dateAxisTop + dateAxisH + panelGap;
   const rsiTop = volumeTop + volumeH + panelGap;
   const macdTop = rsiTop + rsiH + panelGap;
-  const min = Math.min(...candles.map(c => c.low));
-  const max = Math.max(...candles.map(c => c.high));
+  const fibPrices = chartShowFibs
+    ? (data.fibs || []).flatMap(f => (f.levels || []).map(l => l.price).filter(Number.isFinite))
+    : [];
+  const min = Math.min(...candles.map(c => c.low), ...fibPrices);
+  const max = Math.max(...candles.map(c => c.high), ...fibPrices);
   const span = Math.max(0.000001, max - min);
   const y = v => pad.top + (max - v) / span * priceH;
   const x = i => pad.left + (candles.length === 1 ? chartW / 2 : i / (candles.length - 1) * chartW);
@@ -2021,40 +2024,103 @@ function drawChartCompressions(ctx, compressions, indexByTime, x, y) {
 
 function drawFibRetracements(ctx, fibs, indexByTime, x, y, pad, w, priceH) {
   if (!fibs || fibs.length === 0) return;
+
   ctx.save();
   ctx.font = '10px SF Mono, monospace';
   ctx.lineWidth = 1;
+
+  const chartLeft = pad.left;
+  const chartRight = w - pad.right;
+  const chartWidth = chartRight - chartLeft;
+
   for (const fib of fibs) {
     const fromIdx = indexByTime.get(fib.fromTime);
     const toIdx = indexByTime.get(fib.toTime);
-    if (fromIdx == null || toIdx == null || !Array.isArray(fib.levels)) continue;
-    const startX = x(fromIdx);
-    const endX = w - pad.right;
-    const labelX = startX + (endX - startX) * 0.35;
-    const color = fib.kind === 'downtrend' ? '88,166,255' : '210,153,34';
+
+    if (
+            fromIdx == null ||
+            toIdx == null ||
+            !Array.isArray(fib.levels)
+    ) {
+      continue;
+    }
+
+    const fromX = x(fromIdx);
+    const toX = x(toIdx);
+
+    /*
+     * On part de l'ancre la plus à gauche, et non systématiquement
+     * de fib.fromTime. Cela évite que les Fib down commencent trop à droite.
+     */
+    const anchorLeftX = Math.min(fromX, toX);
+
+    /*
+     * Prolonge les traits vers la gauche de 12 % de la largeur du graphique.
+     * Augmente 0.12 pour aller encore plus à gauche.
+     */
+    const startX = Math.max(
+            chartLeft,
+            anchorLeftX - chartWidth * 0.50
+    );
+
+    /*
+     * Les traits vont jusqu'au bord droit de la zone de prix.
+     */
+    const endX = chartRight;
+
+    /*
+     * Label centré géométriquement sur le trait.
+     * Comme startX est déplacé vers la gauche, le label l'est également.
+     */
+    const labelX = (startX + endX) / 2;
+
+    const color =
+            fib.kind === 'downtrend'
+                    ? '88,166,255'
+                    : '210,153,34';
+
     ctx.strokeStyle = `rgba(${color},.45)`;
     ctx.fillStyle = `rgba(${color},.85)`;
     ctx.setLineDash([5, 5]);
+
     for (const lvl of fib.levels) {
+      if (!Number.isFinite(lvl.price)) continue;
+
       const yy = y(lvl.price);
-      if (yy < pad.top || yy > pad.top + priceH) continue;
+
+      if (yy < pad.top || yy > pad.top + priceH) {
+        continue;
+      }
+
       ctx.beginPath();
       ctx.moveTo(startX, yy);
       ctx.lineTo(endX, yy);
       ctx.stroke();
-      const label = `Fib ${(Number(lvl.ratio || 0) * 100).toFixed(1)}%`;
+
+      const ratio = Number(lvl.ratio || 0);
+      const direction =
+              fib.kind === 'downtrend'
+                      ? 'Fib down'
+                      : 'Fib up';
+
+      const label = `${direction} ${(ratio * 100).toFixed(1)}%`;
+
       ctx.setLineDash([]);
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
       ctx.fillText(label, labelX, yy - 4);
       ctx.setLineDash([5, 5]);
     }
+
+    // Ligne diagonale reliant les deux pivots.
     ctx.setLineDash([]);
     ctx.strokeStyle = `rgba(${color},.55)`;
     ctx.beginPath();
-    ctx.moveTo(x(fromIdx), y(fib.fromPrice));
-    ctx.lineTo(x(toIdx), y(fib.toPrice));
+    ctx.moveTo(fromX, y(fib.fromPrice));
+    ctx.lineTo(toX, y(fib.toPrice));
     ctx.stroke();
   }
+
   ctx.restore();
 }
 
