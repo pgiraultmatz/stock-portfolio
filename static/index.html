@@ -1529,8 +1529,8 @@ function setupChartCrosshair() {
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
     const f = chartFrame;
-    const inPricePanel = px >= f.pad.left && px <= f.w - f.pad.right && py >= f.pad.top && py <= f.pad.top + f.priceH;
-    chartHover = inPricePanel ? { x: px, y: py } : null;
+    const inChart = px >= f.pad.left && px <= f.w - f.pad.right && py >= f.pad.top && py <= f.chartBottom;
+    chartHover = inChart ? { x: px, y: py } : null;
     drawChart(chartData);
   });
   canvas.addEventListener('mouseleave', () => {
@@ -1707,9 +1707,12 @@ function drawChart(data) {
   const chartW = w - pad.left - pad.right;
   const priceH = h - pad.top - pad.bottom - volumeH - rsiH - macdH - dateAxisH - panelGap * 3;
   const dateAxisTop = pad.top + priceH;
-  const volumeTop = dateAxisTop + dateAxisH + panelGap;
+  const macdTop = dateAxisTop + dateAxisH + panelGap;
+  const volumeTop = macdTop + macdH + panelGap;
   const rsiTop = volumeTop + volumeH + panelGap;
-  const macdTop = rsiTop + rsiH + panelGap;
+  const maxVol = Math.max(0, ...candles.map(c => Number(c.volume || 0)));
+  const macdVals = (data.macd || []).flatMap(p => [p.macd, p.signal, p.histogram]);
+  const macdMaxAbs = Math.max(0.000001, ...macdVals.map(v => Math.abs(Number(v || 0))));
   const fibPrices = chartShowFibs
     ? (data.fibs || []).flatMap(f => (f.levels || []).map(l => l.price).filter(Number.isFinite))
     : [];
@@ -1718,7 +1721,36 @@ function drawChart(data) {
   const span = Math.max(0.000001, max - min);
   const y = v => pad.top + (max - v) / span * priceH;
   const x = i => pad.left + (candles.length === 1 ? chartW / 2 : i / (candles.length - 1) * chartW);
-  chartFrame = { pad, w, h, chartW, priceH, dateAxisTop, dateAxisH, min, max, span, candles, currency: data.currency, x, y };
+  chartFrame = {
+    pad, w, h, chartW, priceH, dateAxisTop, dateAxisH, min, max, span, candles, currency: data.currency, x, y,
+    chartBottom: rsiTop + rsiH,
+    panels: [
+      {
+        top: pad.top,
+        height: priceH,
+        valueAt: yy => max - ((yy - pad.top) / priceH) * span,
+        format: v => formatChartPrice(v, data.currency),
+      },
+      {
+        top: macdTop,
+        height: macdH,
+        valueAt: yy => ((macdTop + macdH / 2 - yy) / Math.max(1, macdH / 2 - 14)) * macdMaxAbs,
+        format: formatIndicator,
+      },
+      {
+        top: volumeTop,
+        height: volumeH,
+        valueAt: yy => maxVol <= 0 ? 0 : ((volumeTop + volumeH - yy) / Math.max(1, volumeH - 22)) * maxVol,
+        format: formatVolume,
+      },
+      {
+        top: rsiTop,
+        height: rsiH,
+        valueAt: yy => 100 - ((yy - rsiTop) / rsiH) * 100,
+        format: v => Number(v).toFixed(1),
+      },
+    ],
+  };
 
   ctx.font = '11px SF Mono, monospace';
   ctx.lineWidth = 1;
@@ -1765,9 +1797,9 @@ function drawChart(data) {
   drawMovingAverage(ctx, ma200, indexByTime, x, y, '#db61a2', `${maLabel} 200`, pad.left + 160, pad.top + 12);
   drawChartDivergences(ctx, data.divergences || [], indexByTime, x, y);
   drawChartDateAxis(ctx, candles, pad, w, dateAxisTop, dateAxisH);
+  drawMACDPanel(ctx, data.macd || [], candles, x, bodyW, pad, w, macdTop, macdH);
   drawVolumePanel(ctx, candles, x, bodyW, pad, w, volumeTop, volumeH);
   drawRSIPanel(ctx, data.rsi14 || [], candles, x, pad, w, rsiTop, rsiH);
-  drawMACDPanel(ctx, data.macd || [], candles, x, bodyW, pad, w, macdTop, macdH);
 
   const first = candles[0];
   const last = candles[candles.length - 1];
@@ -1834,13 +1866,14 @@ function drawChartCrosshair(ctx, hover) {
   const f = chartFrame;
   if (!f || !hover) return;
   const xPos = Math.max(f.pad.left, Math.min(f.w - f.pad.right, hover.x));
-  const yPos = Math.max(f.pad.top, Math.min(f.pad.top + f.priceH, hover.y));
-  const price = f.max - ((yPos - f.pad.top) / f.priceH) * f.span;
+  const yPos = Math.max(f.pad.top, Math.min(f.chartBottom, hover.y));
   const idx = Math.max(0, Math.min(f.candles.length - 1, Math.round(((xPos - f.pad.left) / f.chartW) * (f.candles.length - 1))));
   const candle = f.candles[idx];
   const candleX = f.x(idx);
   const dateLabel = formatChartDateLong(candle.time);
-  const priceLabel = formatChartPrice(price, f.currency);
+  const panel = chartPanelAt(f, yPos);
+  const panelY = panel ? Math.max(panel.top, Math.min(panel.top + panel.height, yPos)) : yPos;
+  const valueLabel = panel ? panel.format(panel.valueAt(panelY)) : '';
 
   ctx.save();
   ctx.setLineDash([4, 4]);
@@ -1848,26 +1881,30 @@ function drawChartCrosshair(ctx, hover) {
   ctx.strokeStyle = 'rgba(139,148,158,.75)';
   ctx.beginPath();
   ctx.moveTo(candleX, f.pad.top);
-  ctx.lineTo(candleX, f.dateAxisTop + f.dateAxisH);
-  ctx.moveTo(f.pad.left, yPos);
-  ctx.lineTo(f.w - f.pad.right, yPos);
+  ctx.lineTo(candleX, f.chartBottom);
+  if (panel) {
+    ctx.moveTo(f.pad.left, panelY);
+    ctx.lineTo(f.w - f.pad.right, panelY);
+  }
   ctx.stroke();
   ctx.setLineDash([]);
 
   ctx.font = '11px SF Mono, monospace';
   ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  const priceW = ctx.measureText(priceLabel).width + 12;
-  const priceX = f.w - f.pad.right + 4;
-  const priceY = Math.max(f.pad.top + 10, Math.min(f.pad.top + f.priceH - 10, yPos));
-  ctx.fillStyle = '#21262d';
-  ctx.strokeStyle = '#6e7681';
-  ctx.beginPath();
-  chartRoundRect(ctx, priceX, priceY - 10, priceW, 20, 4);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#e6edf3';
-  ctx.fillText(priceLabel, priceX + 6, priceY);
+  if (panel && valueLabel) {
+    ctx.textAlign = 'left';
+    const valueW = ctx.measureText(valueLabel).width + 12;
+    const valueX = f.w - f.pad.right + 4;
+    const valueY = Math.max(panel.top + 10, Math.min(panel.top + panel.height - 10, panelY));
+    ctx.fillStyle = '#21262d';
+    ctx.strokeStyle = '#6e7681';
+    ctx.beginPath();
+    chartRoundRect(ctx, valueX, valueY - 10, valueW, 20, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e6edf3';
+    ctx.fillText(valueLabel, valueX + 6, valueY);
+  }
 
   ctx.textAlign = 'center';
   const dateW = ctx.measureText(dateLabel).width + 14;
@@ -1882,6 +1919,11 @@ function drawChartCrosshair(ctx, hover) {
   ctx.fillStyle = '#e6edf3';
   ctx.fillText(dateLabel, dateX, dateY);
   ctx.restore();
+}
+
+function chartPanelAt(frame, y) {
+  if (!frame || !frame.panels) return null;
+  return frame.panels.find(p => y >= p.top && y <= p.top + p.height) || null;
 }
 
 function drawChartDateAxis(ctx, candles, pad, w, top, height) {

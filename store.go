@@ -35,7 +35,7 @@ type SessionData struct {
 }
 
 type XGroup struct {
-	Name    string   `json:"name"    dynamodbav:"Name"`
+	Name     string   `json:"name"    dynamodbav:"Name"`
 	Accounts []string `json:"accounts" dynamodbav:"Accounts"`
 }
 
@@ -811,7 +811,7 @@ func (d *DynamoStore) LinkGoogleID(ctx context.Context, userID, googleID string)
 					"PK": &types.AttributeValueMemberS{Value: "USER#" + userID},
 					"SK": &types.AttributeValueMemberS{Value: "PROFILE"},
 				},
-				UpdateExpression:    aws.String("SET GoogleID = :g"),
+				UpdateExpression: aws.String("SET GoogleID = :g"),
 				ExpressionAttributeValues: map[string]types.AttributeValue{
 					":g": &types.AttributeValueMemberS{Value: googleID},
 				},
@@ -968,4 +968,3 @@ func isDynamoConditionalFailed(err error) bool {
 	var ccf *types.ConditionalCheckFailedException
 	return errors.As(err, &ccf)
 }
-

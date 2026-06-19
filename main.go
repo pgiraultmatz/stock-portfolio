@@ -804,6 +804,7 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	cachePath := chartCachePath(symbol, fetchRange, interval)
 	if cached, ok := loadChartCache(cachePath, ttl); ok && !cached.Stale {
 		cached = trimChartResponse(cached, rng, interval, maMode)
+		applyCurrentDailyCandle(r.Context(), &cached)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(cached)
 		return
@@ -814,6 +815,7 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 		if cached, ok := loadChartCache(cachePath, ttl); ok {
 			cached.Stale = true
 			cached = trimChartResponse(cached, rng, interval, maMode)
+			applyCurrentDailyCandle(r.Context(), &cached)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(cached)
 			return
@@ -827,6 +829,7 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	cr.ValidUntil = cr.UpdatedAt.Add(ttl)
 	saveChartCache(cachePath, cr)
 	cr = trimChartResponse(cr, rng, interval, maMode)
+	applyCurrentDailyCandle(r.Context(), &cr)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(cr)
 }
@@ -981,6 +984,161 @@ func fetchYahooChart(ctx context.Context, symbol, rng, interval string) (ChartRe
 	cr := ChartResponse{Symbol: res.Meta.Symbol, Currency: res.Meta.Currency, Candles: candles}
 	enrichChartIndicators(&cr)
 	return cr, nil
+}
+
+func applyCurrentDailyCandle(ctx context.Context, cr *ChartResponse) {
+	if cr == nil || cr.Interval != "1d" || cr.Symbol == "" {
+		return
+	}
+	candle, ok := fetchYahooCurrentDailyCandle(ctx, cr.Symbol)
+	if !ok || candle.Close <= 0 {
+		return
+	}
+	if len(cr.Candles) == 0 {
+		cr.Candles = []ChartCandle{candle}
+		recomputeChartIndicators(cr)
+		return
+	}
+	lastIdx := len(cr.Candles) - 1
+	if sameMarketDay(cr.Candles[lastIdx].Time, candle.Time) {
+		existing := cr.Candles[lastIdx]
+		candle.Open = firstPositive(existing.Open, candle.Open)
+		candle.High = math.Max(existing.High, candle.High)
+		if existing.Low > 0 {
+			candle.Low = math.Min(existing.Low, candle.Low)
+		}
+		cr.Candles[lastIdx] = candle
+		recomputeChartIndicators(cr)
+		return
+	}
+	if candle.Time > cr.Candles[lastIdx].Time {
+		cr.Candles = append(cr.Candles, candle)
+		recomputeChartIndicators(cr)
+	}
+}
+
+func fetchYahooCurrentDailyCandle(ctx context.Context, symbol string) (ChartCandle, bool) {
+	type chartMeta struct {
+		RegularMarketPrice float64 `json:"regularMarketPrice"`
+	}
+	type chartResp struct {
+		Chart struct {
+			Result []struct {
+				Meta       chartMeta `json:"meta"`
+				Timestamp  []int64   `json:"timestamp"`
+				Indicators struct {
+					Quote []struct {
+						Open   []*float64 `json:"open"`
+						High   []*float64 `json:"high"`
+						Low    []*float64 `json:"low"`
+						Close  []*float64 `json:"close"`
+						Volume []*int64   `json:"volume"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+		} `json:"chart"`
+	}
+	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(symbol) + "?range=1d&interval=5m"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return ChartCandle{}, false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ChartCandle{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ChartCandle{}, false
+	}
+	var yr chartResp
+	if err := json.NewDecoder(resp.Body).Decode(&yr); err != nil {
+		return ChartCandle{}, false
+	}
+	if len(yr.Chart.Result) == 0 || len(yr.Chart.Result[0].Indicators.Quote) == 0 {
+		return ChartCandle{}, false
+	}
+	res := yr.Chart.Result[0]
+	q := res.Indicators.Quote[0]
+	if len(res.Timestamp) == 0 {
+		return ChartCandle{}, false
+	}
+	var candle ChartCandle
+	for i, ts := range res.Timestamp {
+		if i >= len(q.Open) || i >= len(q.High) || i >= len(q.Low) || i >= len(q.Close) {
+			continue
+		}
+		if q.Open[i] == nil || q.High[i] == nil || q.Low[i] == nil || q.Close[i] == nil {
+			continue
+		}
+		if candle.Time == 0 {
+			candle.Time = ts
+			candle.Open = *q.Open[i]
+			candle.High = *q.High[i]
+			candle.Low = *q.Low[i]
+		}
+		candle.High = math.Max(candle.High, *q.High[i])
+		if candle.Low == 0 {
+			candle.Low = *q.Low[i]
+		} else {
+			candle.Low = math.Min(candle.Low, *q.Low[i])
+		}
+		candle.Close = *q.Close[i]
+		if i < len(q.Volume) && q.Volume[i] != nil {
+			candle.Volume += *q.Volume[i]
+		}
+	}
+	if res.Meta.RegularMarketPrice > 0 {
+		candle.Close = res.Meta.RegularMarketPrice
+		candle.High = math.Max(candle.High, candle.Close)
+		if candle.Low == 0 {
+			candle.Low = candle.Close
+		} else {
+			candle.Low = math.Min(candle.Low, candle.Close)
+		}
+	}
+	if candle.Time == 0 || candle.Open == 0 || candle.High == 0 || candle.Low == 0 || candle.Close == 0 {
+		return ChartCandle{}, false
+	}
+	return candle, true
+}
+
+func recomputeChartIndicators(cr *ChartResponse) {
+	cr.RSI14 = nil
+	cr.SMA50 = nil
+	cr.SMA100 = nil
+	cr.SMA200 = nil
+	cr.EMA50 = nil
+	cr.EMA100 = nil
+	cr.EMA200 = nil
+	cr.MACD = nil
+	cr.Pivots = nil
+	cr.Levels = nil
+	cr.Divergences = nil
+	cr.Channels = nil
+	cr.Compressions = nil
+	cr.Fibs = nil
+	cr.Analysis = ChartAnalysis{}
+	enrichChartIndicators(cr)
+}
+
+func sameMarketDay(a, b int64) bool {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		loc = time.FixedZone("ET", -5*60*60)
+	}
+	ta := time.Unix(a, 0).In(loc)
+	tb := time.Unix(b, 0).In(loc)
+	return ta.Year() == tb.Year() && ta.Month() == tb.Month() && ta.Day() == tb.Day()
+}
+
+func firstPositive(a, b float64) float64 {
+	if a > 0 {
+		return a
+	}
+	return b
 }
 
 func enrichChartIndicators(cr *ChartResponse) {
@@ -1859,42 +2017,399 @@ func maxInt64(a, b int64) int64 {
 	}
 	return b
 }
+func recentAllMAReclaimConfirmed(
+	candles []ChartCandle,
+	ma50, ma100, ma200 []ChartLinePoint,
+	maxBars int,
+) (ChartCandle, float64, bool) {
+	if len(candles) < 2 ||
+		len(ma50) == 0 ||
+		len(ma100) == 0 ||
+		len(ma200) == 0 ||
+		maxBars <= 0 {
+		return ChartCandle{}, 0, false
+	}
+	start := maxInt(1, len(candles)-maxBars)
+
+	for i := len(candles) - 1; i >= start; i-- {
+		previous := candles[i-1]
+		current := candles[i]
+
+		previousMA50, okPrevious50 := chartLineValueAtOrBefore(
+			ma50,
+			previous.Time,
+		)
+		previousMA100, okPrevious100 := chartLineValueAtOrBefore(
+			ma100,
+			previous.Time,
+		)
+		previousMA200, okPrevious200 := chartLineValueAtOrBefore(
+			ma200,
+			previous.Time,
+		)
+
+		currentMA50, okCurrent50 := chartLineValueAtOrBefore(
+			ma50,
+			current.Time,
+		)
+		currentMA100, okCurrent100 := chartLineValueAtOrBefore(
+			ma100,
+			current.Time,
+		)
+		currentMA200, okCurrent200 := chartLineValueAtOrBefore(
+			ma200,
+			current.Time,
+		)
+
+		if !okPrevious50 ||
+			!okPrevious100 ||
+			!okPrevious200 ||
+			!okCurrent50 ||
+			!okCurrent100 ||
+			!okCurrent200 {
+			continue
+		}
+
+		previousCeiling := math.Max(
+			previousMA50,
+			math.Max(previousMA100, previousMA200),
+		)
+
+		currentCeiling := math.Max(
+			currentMA50,
+			math.Max(currentMA100, currentMA200),
+		)
+
+		crossedAllMAs :=
+			previous.Close <= previousCeiling &&
+				current.Close >= currentCeiling*1.005
+
+		if !crossedAllMAs {
+			continue
+		}
+
+		heldAboveCluster := true
+
+		for j := i; j < len(candles); j++ {
+			value50, ok50 := chartLineValueAtOrBefore(
+				ma50,
+				candles[j].Time,
+			)
+			value100, ok100 := chartLineValueAtOrBefore(
+				ma100,
+				candles[j].Time,
+			)
+			value200, ok200 := chartLineValueAtOrBefore(
+				ma200,
+				candles[j].Time,
+			)
+
+			if !ok50 || !ok100 || !ok200 {
+				heldAboveCluster = false
+				break
+			}
+
+			ceiling := math.Max(
+				value50,
+				math.Max(value100, value200),
+			)
+
+			if candles[j].Close < ceiling*0.985 {
+				heldAboveCluster = false
+				break
+			}
+		}
+
+		if !heldAboveCluster {
+			continue
+		}
+
+		last := candles[len(candles)-1]
+
+		lastMA50, ok50 := chartLineValueAtOrBefore(ma50, last.Time)
+		lastMA100, ok100 := chartLineValueAtOrBefore(ma100, last.Time)
+		lastMA200, ok200 := chartLineValueAtOrBefore(ma200, last.Time)
+
+		if !ok50 || !ok100 || !ok200 {
+			continue
+		}
+
+		lastCeiling := math.Max(
+			lastMA50,
+			math.Max(lastMA100, lastMA200),
+		)
+
+		if last.Close < lastCeiling {
+			continue
+		}
+
+		return current, lastCeiling, true
+	}
+
+	return ChartCandle{}, 0, false
+
+}
+func recentMAReclaimConfirmed(
+	candles []ChartCandle,
+	ma []ChartLinePoint,
+	maxBars int,
+) (ChartCandle, float64, bool) {
+	if len(candles) < 2 || len(ma) == 0 || maxBars <= 0 {
+		return ChartCandle{}, 0, false
+	}
+
+	last := candles[len(candles)-1]
+	lastMA, ok := chartLineValueAtOrBefore(ma, last.Time)
+	if !ok || lastMA <= 0 || last.Close < lastMA*1.005 {
+		return ChartCandle{}, 0, false
+	}
+
+	start := maxInt(1, len(candles)-maxBars-1)
+
+	for i := len(candles) - 1; i >= start; i-- {
+		previous := candles[i-1]
+		current := candles[i]
+
+		previousMA, okPrevious := chartLineValueAtOrBefore(
+			ma,
+			previous.Time,
+		)
+		currentMA, okCurrent := chartLineValueAtOrBefore(
+			ma,
+			current.Time,
+		)
+
+		if !okPrevious ||
+			!okCurrent ||
+			previousMA <= 0 ||
+			currentMA <= 0 {
+			continue
+		}
+
+		crossed :=
+			previous.Close <= previousMA &&
+				current.Close > currentMA
+
+		if !crossed {
+			continue
+		}
+
+		heldAbove := true
+
+		for j := i; j < len(candles); j++ {
+			value, ok := chartLineValueAtOrBefore(
+				ma,
+				candles[j].Time,
+			)
+
+			if !ok || value <= 0 {
+				heldAbove = false
+				break
+			}
+
+			if candles[j].Close < value*0.985 {
+				heldAbove = false
+				break
+			}
+		}
+
+		if heldAbove {
+			return current, lastMA, true
+		}
+	}
+
+	return ChartCandle{}, 0, false
+
+}
 
 func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 	if len(cr.Candles) < 30 {
-		return ChartAnalysis{Bias: "neutral", Summary: "Not enough candles for a reliable technical setup."}
+		return ChartAnalysis{
+			Bias:    "neutral",
+			Summary: "Not enough candles for a reliable technical setup.",
+		}
 	}
+
 	candles := cr.Candles
 	last := candles[len(candles)-1]
 	prev := candles[len(candles)-2]
 	lastClose := last.Close
+
 	if lastClose <= 0 {
-		return ChartAnalysis{Bias: "neutral", Summary: "No usable close price for technical analysis."}
+		return ChartAnalysis{
+			Bias:    "neutral",
+			Summary: "No usable close price for technical analysis.",
+		}
 	}
 
 	var setups []ChartSetup
+
 	ma50Lines, ma100Lines, ma200Lines := activeMALines(cr)
 	maLabel := activeMALabel(cr)
+
 	ma50Label := maLabel + "50"
 	ma100Label := maLabel + "100"
 	ma200Label := maLabel + "200"
+
 	latestSMA50, hasSMA50 := latestChartLine(ma50Lines)
 	latestSMA100, hasSMA100 := latestChartLine(ma100Lines)
 	latestSMA200, hasSMA200 := latestChartLine(ma200Lines)
+
 	latestRSI, hasRSI := latestChartLine(cr.RSI14)
 	latestMACD, hasMACD := latestChartMACD(cr.MACD)
+
 	recent := candles[maxInt(0, len(candles)-30):]
 	shortRecent := candles[maxInt(0, len(candles)-12):]
+
 	recentHigh := chartRecentHigh(recent)
 	recentLow := chartRecentLow(recent)
 	shortRecentHigh := chartRecentHigh(shortRecent)
 	shortRecentLow := chartRecentLow(shortRecent)
 
-	if support, ok := nearestSupportLevel(cr.Levels, lastClose); ok && recentHigh > lastClose*1.18 {
+	bearishMAStack := hasSMA50 &&
+		hasSMA100 &&
+		hasSMA200 &&
+		latestSMA50 < latestSMA100 &&
+		latestSMA100 < latestSMA200
+
+	bullishMAStack := hasSMA50 &&
+		hasSMA100 &&
+		hasSMA200 &&
+		latestSMA50 > latestSMA100 &&
+		latestSMA100 > latestSMA200
+
+	/*
+		Reclaim de l'ensemble des moyennes mobiles.
+
+		Ce setup remplace les cartes individuelles EMA50, EMA100
+		et EMA200 lorsqu'un franchissement global est détecté.
+	*/
+	allMAReclaimActive := false
+
+	if hasSMA50 && hasSMA100 && hasSMA200 {
+		if reclaimCandle, reclaimLevel, ok := recentAllMAReclaimConfirmed(
+			candles,
+			ma50Lines,
+			ma100Lines,
+			ma200Lines,
+			12,
+		); ok {
+			confidence := "watch"
+
+			strongClose := lastClose >= reclaimLevel*1.02
+
+			momentumConfirmed :=
+				hasMACD &&
+					latestMACD.Histogram > 0 &&
+					hasRSI &&
+					latestRSI >= 50 &&
+					latestRSI <= 75
+
+			switch {
+			case bullishMAStack && strongClose && momentumConfirmed:
+				confidence = "high"
+
+			case !bearishMAStack && strongClose && momentumConfirmed:
+				confidence = "medium"
+
+			case bearishMAStack:
+				confidence = "watch"
+			}
+
+			setups = append(setups, ChartSetup{
+				Kind:       "all_ma_reclaim",
+				Title:      ma50Label + " / " + ma100Label + " / " + ma200Label + " reclaim",
+				Bias:       "bullish reversal",
+				Confidence: confidence,
+				Detail: "Price recently closed above " +
+					ma50Label + ", " +
+					ma100Label + " and " +
+					ma200Label + ", signaling an early bullish reversal attempt.",
+				TriggerTime:       reclaimCandle.Time,
+				TriggerPrice:      reclaimCandle.High,
+				InvalidationPrice: reclaimLevel * 0.985,
+				PositiveOutcome:   "Holding above the reclaimed moving-average cluster supports further upside toward the next resistance zone.",
+				NegativeOutcome:   "A close back below the reclaimed moving-average cluster would indicate a false breakout.",
+			})
+
+			allMAReclaimActive = true
+		}
+	}
+
+	/*
+		L'alignement des moyennes est indépendant du comportement
+		actuel du prix.
+	*/
+	if bearishMAStack {
+		setups = append(setups, ChartSetup{
+			Kind:       "bearish_ma_stack",
+			Title:      "Bearish " + maLabel + " alignment",
+			Bias:       "bearish warning",
+			Confidence: "watch",
+			Detail: ma50Label + " remains below " +
+				ma100Label + ", while " +
+				ma100Label + " remains below " +
+				ma200Label + ". The long-term trend structure remains bearish.",
+			PositiveOutcome: ma50Label + " flattening and crossing above " +
+				ma100Label + " would show that the trend structure is improving.",
+			NegativeOutcome: "Continued bearish alignment increases the risk that rallies remain temporary rebounds.",
+		})
+	}
+
+	/*
+		Reclaim spécifique de la moyenne mobile 200.
+
+		Il est détecté avant le pullback EMA200 afin d'éviter
+		que les deux setups soient affichés simultanément.
+	*/
+	ma200ReclaimActive := false
+
+	if hasSMA200 && !allMAReclaimActive {
+		if reclaimCandle, reclaimLevel, ok := recentMAReclaimConfirmed(
+			candles,
+			ma200Lines,
+			10,
+		); ok {
+			confidence := "watch"
+
+			momentumConfirmed :=
+				hasMACD &&
+					latestMACD.Histogram > 0 &&
+					hasRSI &&
+					latestRSI >= 50 &&
+					latestRSI <= 75
+
+			if momentumConfirmed && lastClose >= reclaimLevel*1.02 {
+				confidence = "medium"
+			}
+
+			setups = append(setups, ChartSetup{
+				Kind:              "ma200_reclaim_confirmation",
+				Title:             ma200Label + " reclaim",
+				Bias:              "bullish reversal",
+				Confidence:        confidence,
+				Detail:            "Price recently reclaimed the long-term " + ma200Label + ", signaling a potential change in market regime.",
+				TriggerTime:       reclaimCandle.Time,
+				TriggerPrice:      reclaimCandle.High,
+				InvalidationPrice: reclaimLevel * 0.985,
+				PositiveOutcome:   "Holding above " + ma200Label + " strengthens the reversal attempt and supports further upside.",
+				NegativeOutcome:   "A close back below " + ma200Label + " would raise the risk of a false breakout.",
+			})
+
+			ma200ReclaimActive = true
+		}
+	}
+
+	if support, ok := nearestSupportLevel(cr.Levels, lastClose); ok &&
+		recentHigh > lastClose*1.18 {
 		trigger := math.Max(prev.High, last.High)
-		if hasSMA200 && latestSMA200 > trigger && latestSMA200 < recentHigh {
+
+		if hasSMA200 &&
+			latestSMA200 > trigger &&
+			latestSMA200 < recentHigh {
 			trigger = latestSMA200
 		}
+
 		setups = append(setups, ChartSetup{
 			Kind:              "breakout_rejection_support_test",
 			Title:             "Breakout rejection / support test",
@@ -1908,15 +2423,33 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		})
 	}
 
-	if hasSMA200 && latestSMA200 > 0 {
+	/*
+		EMA200 pullback :
+
+		Le cours était déjà au-dessus de l'EMA200 et revient la tester.
+		Ce setup est différent d'un reclaim depuis le dessous.
+	*/
+	if hasSMA200 &&
+		latestSMA200 > 0 &&
+		!allMAReclaimActive &&
+		!ma200ReclaimActive {
 		dist := (lastClose - latestSMA200) / latestSMA200
+
 		extendedHigh := recentHigh > latestSMA200*1.08
-		testingMA := math.Abs(dist) <= 0.035 || (last.Low <= latestSMA200*1.02 && lastClose >= latestSMA200*0.985)
+
+		testingMA :=
+			math.Abs(dist) <= 0.035 ||
+				(last.Low <= latestSMA200*1.02 &&
+					lastClose >= latestSMA200*0.985)
+
 		if extendedHigh && testingMA {
 			confidence := "watch"
-			if lastClose >= latestSMA200 && lastClose >= prev.Close {
+
+			if lastClose >= latestSMA200 &&
+				lastClose >= prev.Close {
 				confidence = "medium"
 			}
+
 			setups = append(setups, ChartSetup{
 				Kind:              "sma200_pullback",
 				Title:             "Pullback on " + ma200Label,
@@ -1931,7 +2464,11 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		}
 	}
 
-	if lvl, ok := nearestRetestedResistance(cr.Levels, lastClose, recentHigh); ok {
+	if lvl, ok := nearestRetestedResistance(
+		cr.Levels,
+		lastClose,
+		recentHigh,
+	); ok {
 		setups = append(setups, ChartSetup{
 			Kind:              "breakout_retest",
 			Title:             "Breakout retest",
@@ -1945,9 +2482,18 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		})
 	}
 
-	if hasSMA50 && hasSMA200 && latestSMA50 > latestSMA200 && lastClose > latestSMA50 {
-		recentLowNearSMA50 := shortRecentLow <= latestSMA50*1.08 && shortRecentLow >= latestSMA50*0.84
-		priceRecovered := lastClose > prev.Close || lastClose > latestSMA50*1.03
+	if hasSMA50 &&
+		hasSMA200 &&
+		latestSMA50 > latestSMA200 &&
+		lastClose > latestSMA50 {
+		recentLowNearSMA50 :=
+			shortRecentLow <= latestSMA50*1.08 &&
+				shortRecentLow >= latestSMA50*0.84
+
+		priceRecovered :=
+			lastClose > prev.Close ||
+				lastClose > latestSMA50*1.03
+
 		if recentLowNearSMA50 && priceRecovered {
 			setups = append(setups, ChartSetup{
 				Kind:              "ma_support_bounce",
@@ -1963,76 +2509,145 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		}
 	}
 
-	if hasSMA50 && recentSMA50ReclaimConfirmed(candles, ma50Lines, last, 8) {
-		confidence := "watch"
-		if hasMACD && latestMACD.Histogram > 0 {
-			confidence = "medium"
-		}
-		setups = append(setups, ChartSetup{
-			Kind:              "ma50_reclaim_confirmation",
-			Title:             ma50Label + " reclaim confirmation",
-			Bias:              "bullish if defended",
-			Confidence:        confidence,
-			Detail:            "Price recently reclaimed " + ma50Label + " and is holding above it after a prior downtrend.",
-			TriggerPrice:      math.Max(prev.High, last.High),
-			InvalidationPrice: latestSMA50 * 0.97,
-			PositiveOutcome:   "Holding above " + ma50Label + " can extend the rebound toward the next moving-average/resistance zone.",
-			NegativeOutcome:   "A close back below " + ma50Label + " would weaken the reversal attempt.",
-		})
-	}
+	/*
+		Reclaim générique EMA50.
+	*/
+	if hasSMA50 && !allMAReclaimActive {
+		if reclaimCandle, reclaimLevel, ok := recentMAReclaimConfirmed(
+			candles,
+			ma50Lines,
+			8,
+		); ok {
+			confidence := "watch"
 
-	if hasSMA50 {
-		if div := latestRecentDivergence(cr.Divergences, last.Time); div.Kind == "bearish" && bearishDivergencePlayedThenMA50Reclaimed(candles, ma50Lines, div, last) {
+			if hasMACD && latestMACD.Histogram > 0 {
+				confidence = "medium"
+			}
+
 			setups = append(setups, ChartSetup{
-				Kind:              "ma50_reclaim_after_bearish_divergence",
-				Title:             ma50Label + " reclaim after bearish divergence",
-				Bias:              "bullish with divergence warning",
-				Confidence:        "watch",
-				Detail:            "The bearish divergence triggered a pullback below " + ma50Label + ", but price has now closed back above it.",
-				TriggerPrice:      math.Max(prev.High, last.High),
-				InvalidationPrice: latestSMA50 * 0.97,
-				PositiveOutcome:   "Holding above " + ma50Label + " can turn the pullback into trend continuation.",
-				NegativeOutcome:   "Losing " + ma50Label + " again would reactivate the bearish-divergence risk.",
+				Kind:              "ma50_reclaim_confirmation",
+				Title:             ma50Label + " reclaim",
+				Bias:              "bullish if defended",
+				Confidence:        confidence,
+				Detail:            "Price recently reclaimed " + ma50Label + " and is attempting to hold it as support.",
+				TriggerTime:       reclaimCandle.Time,
+				TriggerPrice:      reclaimCandle.High,
+				InvalidationPrice: reclaimLevel * 0.97,
+				PositiveOutcome:   "Holding above " + ma50Label + " supports continuation toward the next moving-average or resistance zone.",
+				NegativeOutcome:   "A close back below " + ma50Label + " would weaken the rebound.",
 			})
 		}
 	}
 
-	if hasSMA50 && hasSMA100 {
-		if div := latestRecentDivergence(cr.Divergences, last.Time); div.Kind == "bearish" && bearishDivergencePlayedThenMA100Reclaimed(candles, ma50Lines, ma100Lines, div, last) {
+	/*
+		Reclaim générique EMA100.
+
+		Il ne dépend plus d'une divergence RSI bearish.
+	*/
+	if hasSMA100 && !allMAReclaimActive {
+		if reclaimCandle, reclaimLevel, ok := recentMAReclaimConfirmed(
+			candles,
+			ma100Lines,
+			8,
+		); ok {
+			confidence := "watch"
+
+			if hasMACD &&
+				latestMACD.Histogram > 0 &&
+				hasRSI &&
+				latestRSI >= 50 &&
+				latestRSI <= 75 {
+				confidence = "medium"
+			}
+
+			trigger := math.Max(prev.High, last.High)
+			overheadMA := 0.0
+
+			if hasSMA50 && latestSMA50 > lastClose {
+				overheadMA = latestSMA50
+			}
+
+			if hasSMA200 && latestSMA200 > lastClose {
+				if overheadMA == 0 ||
+					latestSMA200 > overheadMA {
+					overheadMA = latestSMA200
+				}
+			}
+
+			if overheadMA > 0 {
+				trigger = overheadMA
+			}
+
+			detail := "Price recently reclaimed " +
+				ma100Label +
+				" and is attempting to hold it as support."
+
+			if overheadMA > 0 {
+				detail += " The higher moving-average cluster still needs to be reclaimed before the broader structure improves."
+			}
+
 			setups = append(setups, ChartSetup{
-				Kind:              "ma100_reclaim_after_bearish_divergence",
+				Kind:              "ma100_reclaim_confirmation",
 				Title:             ma100Label + " support reclaim",
-				Bias:              "decision under bearish pressure",
-				Confidence:        "watch",
-				Detail:            "Bearish divergence and trend-channel weakness have played out; price is now attempting to hold " + ma100Label + " support.",
-				TriggerPrice:      latestSMA50,
-				InvalidationPrice: latestSMA100 * 0.97,
-				PositiveOutcome:   "Holding above " + ma100Label + " can drive a rebound toward " + ma50Label + " or the broken channel.",
-				NegativeOutcome:   "Losing " + ma100Label + " confirms downside continuation risk toward lower supports.",
+				Bias:              "bullish if defended",
+				Confidence:        confidence,
+				Detail:            detail,
+				TriggerTime:       reclaimCandle.Time,
+				TriggerPrice:      trigger,
+				InvalidationPrice: reclaimLevel * 0.97,
+				PositiveOutcome: "Holding above " + ma100Label +
+					" and reclaiming the higher moving-average cluster would strengthen the rebound.",
+				NegativeOutcome: "A close back below " + ma100Label +
+					" would invalidate the reclaim and restore downside-continuation risk.",
 			})
 		}
 	}
 
-	setups = append(setups, calcVolumeMACDSetups(candles, cr.MACD, last, prev, latestSMA50, hasSMA50)...)
+	setups = append(
+		setups,
+		calcVolumeMACDSetups(
+			candles,
+			cr.MACD,
+			last,
+			prev,
+			latestSMA50,
+			hasSMA50,
+		)...,
+	)
 
 	if ch, ok := latestChartChannel(cr.Channels); ok {
 		chTop := ch.ResEndPx
 		chBottom := ch.SupportEndPx
+
 		if ch.ResEnd > 0 {
-			chTop = ch.ResEndPx + ch.Slope*float64(last.Time-ch.ResEnd)
+			chTop = ch.ResEndPx +
+				ch.Slope*float64(last.Time-ch.ResEnd)
 		}
+
 		if ch.SupportEnd > 0 {
-			chBottom = ch.SupportEndPx + ch.Slope*float64(last.Time-ch.SupportEnd)
+			chBottom = ch.SupportEndPx +
+				ch.Slope*float64(last.Time-ch.SupportEnd)
 		}
-		if chTop > 0 && chBottom > 0 && channelStillRelevant(ch, last.Time) {
+
+		if chTop > 0 &&
+			chBottom > 0 &&
+			channelStillRelevant(ch, last.Time) {
 			wasAboveChannel := recentHigh > chTop*1.08
-			isRetestingTop := wasAboveChannel && last.Low <= chTop*1.04 && lastClose >= chTop*0.96
+
+			isRetestingTop :=
+				wasAboveChannel &&
+					last.Low <= chTop*1.04 &&
+					lastClose >= chTop*0.96
+
 			switch {
 			case isRetestingTop:
 				confidence := "watch"
-				if lastClose >= chTop && lastClose >= prev.Close {
+
+				if lastClose >= chTop &&
+					lastClose >= prev.Close {
 					confidence = "medium"
 				}
+
 				setups = append(setups, ChartSetup{
 					Kind:              "channel_breakout_retest",
 					Title:             "Channel breakout retest",
@@ -2044,6 +2659,7 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 					PositiveOutcome:   "A close back above the retest zone can validate the breakout attempt.",
 					NegativeOutcome:   "Failure below the upper boundary puts price back into the old channel/range.",
 				})
+
 			case lastClose > chTop*1.01:
 				setups = append(setups, ChartSetup{
 					Kind:              "channel_breakout",
@@ -2056,7 +2672,9 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 					PositiveOutcome:   "Staying above the channel top keeps the breakout structure intact.",
 					NegativeOutcome:   "Return inside the channel increases the risk of a false breakout.",
 				})
-			case lastClose < chBottom*0.99 && !hasMajorDecisionSetup(setups):
+
+			case lastClose < chBottom*0.99 &&
+				!hasMajorDecisionSetup(setups):
 				setups = append(setups, ChartSetup{
 					Kind:              "channel_breakdown",
 					Title:             "Channel breakdown",
@@ -2068,7 +2686,10 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 					PositiveOutcome:   "A reclaim of the channel would neutralize the breakdown.",
 					NegativeOutcome:   "Staying below channel support favors downside continuation.",
 				})
-			case lastClose >= chBottom*0.99 && lastClose <= chTop*1.01 && !wasAboveChannel:
+
+			case lastClose >= chBottom*0.99 &&
+				lastClose <= chTop*1.01 &&
+				!wasAboveChannel:
 				setups = append(setups, ChartSetup{
 					Kind:              "inside_channel",
 					Title:             "Inside channel",
@@ -2087,15 +2708,24 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 	if cp, ok := latestChartCompression(cr.Compressions); ok {
 		cpTop := cp.ResEndPx
 		cpBottom := cp.SupportEndPx
+
 		if cp.ResEnd > 0 {
-			cpTop = cp.ResEndPx + cp.ResSlope*float64(last.Time-cp.ResEnd)
+			cpTop = cp.ResEndPx +
+				cp.ResSlope*float64(last.Time-cp.ResEnd)
 		}
+
 		if cp.SupportEnd > 0 {
-			cpBottom = cp.SupportEndPx + cp.SupportSlope*float64(last.Time-cp.SupportEnd)
+			cpBottom = cp.SupportEndPx +
+				cp.SupportSlope*float64(last.Time-cp.SupportEnd)
 		}
-		if cpTop > 0 && cpBottom > 0 && compressionStillRelevant(cp, last.Time) && !compressionAlreadyBroken(candles, cp, 8) {
+
+		if cpTop > 0 &&
+			cpBottom > 0 &&
+			compressionStillRelevant(cp, last.Time) &&
+			!compressionAlreadyBroken(candles, cp, 8) {
 			switch {
-			case lastClose > cpTop*1.01 && compressionBreakoutIsFresh(candles, cp, 5):
+			case lastClose > cpTop*1.01 &&
+				compressionBreakoutIsFresh(candles, cp, 5):
 				setups = append(setups, ChartSetup{
 					Kind:              "compression_breakout",
 					Title:             "Compression breakout",
@@ -2107,6 +2737,7 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 					PositiveOutcome:   "Holding above the descending resistance favors trend continuation.",
 					NegativeOutcome:   "A close back inside the compression would raise false-breakout risk.",
 				})
+
 			case lastClose < cpBottom*0.97:
 				setups = append(setups, ChartSetup{
 					Kind:              "compression_breakdown",
@@ -2119,15 +2750,22 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 					PositiveOutcome:   "Reclaiming the support line would neutralize the breakdown.",
 					NegativeOutcome:   "Failure below support can turn the pullback into a deeper correction.",
 				})
-			case lastClose >= cpBottom*0.97 && lastClose <= cpTop*1.01:
-				bias := "decision"
-				if hasSMA50 && hasSMA200 && lastClose >= latestSMA50 && lastClose >= latestSMA200 {
-					bias = "bullish if resistance breaks"
+
+			case lastClose >= cpBottom*0.97 &&
+				lastClose <= cpTop*1.01:
+				compressionBias := "decision"
+
+				if hasSMA50 &&
+					hasSMA200 &&
+					lastClose >= latestSMA50 &&
+					lastClose >= latestSMA200 {
+					compressionBias = "bullish if resistance breaks"
 				}
+
 				setups = append(setups, ChartSetup{
 					Kind:              "converging_compression",
 					Title:             "Converging compression",
-					Bias:              bias,
+					Bias:              compressionBias,
 					Confidence:        "watch",
 					Detail:            "Price is compressing between descending resistance and rising/flat support.",
 					TriggerPrice:      cpTop,
@@ -2139,17 +2777,31 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 		}
 	}
 
-	if div := latestRecentDivergence(cr.Divergences, last.Time); div.Kind != "" && isDivergenceStillActionable(div, setups, lastClose) {
-		bias := "bullish"
+	/*
+		Les divergences RSI restent visibles tant qu'un reclaim
+		de moyenne mobile ne les a pas déjà neutralisées.
+	*/
+	if div := latestRecentDivergence(
+		cr.Divergences,
+		last.Time,
+	); div.Kind != "" &&
+		isDivergenceStillActionable(
+			div,
+			setups,
+			lastClose,
+		) {
+		divergenceBias := "bullish"
 		title := "Bullish RSI divergence"
+
 		if div.Kind == "bearish" {
-			bias = "bearish"
+			divergenceBias = "bearish"
 			title = "Bearish RSI divergence"
 		}
+
 		setups = append(setups, ChartSetup{
 			Kind:            div.Kind + "_rsi_divergence",
 			Title:           title,
-			Bias:            bias,
+			Bias:            divergenceBias,
 			Confidence:      "watch",
 			Detail:          "Recent pivot structure shows price and RSI moving in opposite directions.",
 			TriggerTime:     div.ToTime,
@@ -2159,15 +2811,35 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 	}
 
 	sort.SliceStable(setups, func(i, j int) bool {
-		return chartSetupPriority(setups[i]) < chartSetupPriority(setups[j])
+		return chartSetupPriority(setups[i]) <
+			chartSetupPriority(setups[j])
 	})
 
-	bias := chartAnalysisBias(setups, lastClose, latestSMA50, hasSMA50, latestSMA200, hasSMA200, latestRSI, hasRSI, latestMACD, hasMACD)
+	bias := chartAnalysisBias(
+		setups,
+		lastClose,
+		latestSMA50,
+		hasSMA50,
+		latestSMA200,
+		hasSMA200,
+		latestRSI,
+		hasRSI,
+		latestMACD,
+		hasMACD,
+	)
+
 	return ChartAnalysis{
-		Bias:    bias,
-		Summary: chartAnalysisSummary(setups, bias, recentLow, recentHigh, maLabel),
-		Setups:  setups,
+		Bias: bias,
+		Summary: chartAnalysisSummary(
+			setups,
+			bias,
+			recentLow,
+			recentHigh,
+			maLabel,
+		),
+		Setups: setups,
 	}
+
 }
 
 func latestChartLine(points []ChartLinePoint) (float64, bool) {
@@ -2436,7 +3108,13 @@ func compressionAlreadyBroken(candles []ChartCandle, cp ChartCompression, maxBar
 
 func hasMajorDecisionSetup(setups []ChartSetup) bool {
 	for _, s := range setups {
-		if s.Kind == "breakout_rejection_support_test" || s.Kind == "sma200_pullback" || s.Kind == "breakout_retest" {
+		if s.Kind == "breakout_rejection_support_test" ||
+			s.Kind == "sma200_pullback" ||
+			s.Kind == "breakout_retest" ||
+			s.Kind == "all_ma_reclaim" ||
+			s.Kind == "ma50_reclaim_confirmation" ||
+			s.Kind == "ma100_reclaim_confirmation" ||
+			s.Kind == "ma200_reclaim_confirmation" {
 			return true
 		}
 	}
@@ -2447,8 +3125,12 @@ func chartSetupPriority(setup ChartSetup) int {
 	switch setup.Kind {
 	case "breakout_rejection_support_test":
 		return 10
-	case "ma100_reclaim_after_bearish_divergence":
+	case "all_ma_reclaim":
+		return 12
+	case "ma100_reclaim_confirmation":
 		return 15
+	case "ma200_reclaim_confirmation":
+		return 18
 	case "sma200_pullback":
 		return 20
 	case "ma50_reclaim_after_bearish_divergence":
@@ -2471,6 +3153,8 @@ func chartSetupPriority(setup ChartSetup) int {
 		return 48
 	case "inside_channel":
 		return 70
+	case "bearish_ma_stack":
+		return 90
 	}
 	if strings.Contains(setup.Kind, "rsi_divergence") {
 		return 50
@@ -2503,80 +3187,19 @@ func bearishDivergencePlayedThenMA50Reclaimed(candles []ChartCandle, sma50 []Cha
 	return closedBelow
 }
 
-func recentSMA50ReclaimConfirmed(candles []ChartCandle, sma50 []ChartLinePoint, last ChartCandle, maxBars int) bool {
-	if len(candles) < 3 || len(sma50) == 0 || maxBars <= 0 {
-		return false
-	}
-	lastSMA, ok := chartLineValueAtOrBefore(sma50, last.Time)
-	if !ok || lastSMA <= 0 || last.Close <= lastSMA*1.01 {
-		return false
-	}
-
-	crossIdx := -1
-	start := maxInt(1, len(candles)-maxBars-1)
-	for i := start; i < len(candles); i++ {
-		prevMA, okPrev := chartLineValueAtOrBefore(sma50, candles[i-1].Time)
-		curMA, okCur := chartLineValueAtOrBefore(sma50, candles[i].Time)
-		if !okPrev || !okCur || prevMA <= 0 || curMA <= 0 {
-			continue
-		}
-		if candles[i-1].Close < prevMA && candles[i].Close > curMA {
-			crossIdx = i
-		}
-	}
-	if crossIdx < 0 {
-		return false
-	}
-
-	for i := crossIdx; i < len(candles); i++ {
-		ma, ok := chartLineValueAtOrBefore(sma50, candles[i].Time)
-		if ok && ma > 0 && candles[i].Close < ma*0.985 {
-			return false
-		}
-	}
-	return true
-}
-
-func bearishDivergencePlayedThenMA100Reclaimed(candles []ChartCandle, sma50, sma100 []ChartLinePoint, div ChartDivergence, last ChartCandle) bool {
-	if len(candles) == 0 || len(sma50) == 0 || len(sma100) == 0 || div.Kind != "bearish" || last.Time <= div.ToTime {
-		return false
-	}
-	lastSMA50, ok50 := chartLineValueAtOrBefore(sma50, last.Time)
-	lastSMA100, ok100 := chartLineValueAtOrBefore(sma100, last.Time)
-	if !ok50 || !ok100 || lastSMA50 <= 0 || lastSMA100 <= 0 {
-		return false
-	}
-	if last.Close < lastSMA100*0.995 || last.Close >= lastSMA50 {
-		return false
-	}
-	touchedOrLostSMA100 := false
-	closedBelowSMA50 := false
-	for _, c := range candles {
-		if c.Time <= div.ToTime {
-			continue
-		}
-		if c.Time > last.Time {
-			break
-		}
-		ma50, ok50 := chartLineValueAtOrBefore(sma50, c.Time)
-		ma100, ok100 := chartLineValueAtOrBefore(sma100, c.Time)
-		if ok50 && ma50 > 0 && c.Close < ma50*0.99 {
-			closedBelowSMA50 = true
-		}
-		if ok100 && ma100 > 0 && (c.Low <= ma100*1.03 || c.Close < ma100*0.99) {
-			touchedOrLostSMA100 = true
-		}
-	}
-	return closedBelowSMA50 && touchedOrLostSMA100
-}
-
 func isDivergenceStillActionable(div ChartDivergence, setups []ChartSetup, lastClose float64) bool {
 	if div.Kind == "bearish" {
 		if lastClose > div.ToPrice*1.01 {
 			return false
 		}
 		for _, s := range setups {
-			if s.Kind == "ma_support_bounce" || s.Kind == "channel_breakout" || s.Kind == "breakout_retest" {
+			if s.Kind == "ma_support_bounce" ||
+				s.Kind == "channel_breakout" ||
+				s.Kind == "breakout_retest" ||
+				s.Kind == "all_ma_reclaim" ||
+				s.Kind == "ma50_reclaim_confirmation" ||
+				s.Kind == "ma100_reclaim_confirmation" ||
+				s.Kind == "ma200_reclaim_confirmation" {
 				return false
 			}
 		}
@@ -2603,7 +3226,7 @@ func chartAnalysisBias(setups []ChartSetup, lastClose, sma50 float64, hasSMA50 b
 		if strings.Contains(s.Kind, "retest") || strings.Contains(s.Kind, "pullback") {
 			hasActiveRetest = true
 		}
-		if strings.Contains(s.Bias, "decision") || s.Kind == "breakout_rejection_support_test" || s.Kind == "ma100_reclaim_after_bearish_divergence" {
+		if strings.Contains(s.Bias, "decision") || s.Kind == "breakout_rejection_support_test" || s.Kind == "ma100_reclaim_confirmation" {
 			hasDecisionSetup = true
 		}
 	}
@@ -2639,43 +3262,112 @@ func chartAnalysisBias(setups []ChartSetup, lastClose, sma50 float64, hasSMA50 b
 	return "neutral"
 }
 
-func chartAnalysisSummary(setups []ChartSetup, bias string, recentLow, recentHigh float64, maLabel string) string {
+func chartAnalysisSummary(
+	setups []ChartSetup,
+	bias string,
+	recentLow,
+	recentHigh float64,
+	maLabel string,
+) string {
 	ma50 := maLabel + "50"
 	ma100 := maLabel + "100"
+	ma200 := maLabel + "200"
+
 	if len(setups) == 0 {
 		return "No high-confidence setup detected. Price is between recent support and resistance zones."
 	}
-	if len(setups) > 0 && setups[0].Kind == "ma50_reclaim_after_bearish_divergence" {
-		return "Bullish watch: the bearish divergence has already produced a pullback, and price is trying to reclaim " + ma50 + "."
+
+	hasAllMAReclaim := false
+	hasBearishMAStack := false
+
+	for _, setup := range setups {
+		switch setup.Kind {
+		case "all_ma_reclaim":
+			hasAllMAReclaim = true
+		case "bearish_ma_stack":
+			hasBearishMAStack = true
+		}
 	}
-	if len(setups) > 0 && setups[0].Kind == "ma50_reclaim_confirmation" {
-		return "Bullish watch: price has reclaimed " + ma50 + " after a downtrend, but higher moving averages still cap the structure."
+
+	/*
+		Le prix a repris toutes les moyennes, mais leur ordre
+		reste baissier. Les deux informations sont affichées
+		comme des signaux distincts, puis réunies dans le résumé.
+	*/
+	if hasAllMAReclaim && hasBearishMAStack {
+		return "Early bullish reversal: price has reclaimed " +
+			ma50 + ", " +
+			ma100 + " and " +
+			ma200 + ", but the moving averages remain bearishly aligned."
 	}
-	if len(setups) > 0 && setups[0].Kind == "ma100_reclaim_after_bearish_divergence" {
-		return "Decision zone: bearish divergence and channel weakness have played out, but price is now attempting to hold " + ma100 + " support."
+
+	if hasAllMAReclaim {
+		return "Bullish context: price has reclaimed " +
+			ma50 + ", " +
+			ma100 + " and " +
+			ma200 + "."
 	}
-	if len(setups) > 0 && setups[0].Kind == "converging_compression" {
+
+	/*
+		L'alignement bearish est indépendant du reclaim.
+
+		On utilise ce résumé lorsqu'il constitue le setup
+		prioritaire, sans masquer un autre setup plus important.
+	*/
+	if setups[0].Kind == "bearish_ma_stack" {
+		return "Bearish trend structure: " +
+			ma50 + " remains below " +
+			ma100 + ", which remains below " +
+			ma200 + "."
+	}
+
+	if setups[0].Kind == "ma50_reclaim_after_bearish_divergence" {
+		return "Bullish watch: the bearish divergence has already produced a pullback, and price is trying to reclaim " +
+			ma50 + "."
+	}
+
+	if setups[0].Kind == "ma50_reclaim_confirmation" {
+		return "Bullish watch: price has reclaimed " +
+			ma50 +
+			" after a downtrend, but higher moving averages still cap the structure."
+	}
+
+	if setups[0].Kind == "ma100_reclaim_confirmation" {
+		return "Bullish watch: price has reclaimed " +
+			ma100 +
+			" support, but higher moving averages may still cap the rebound."
+	}
+
+	if setups[0].Kind == "converging_compression" {
 		return "Decision zone: price is compressing between descending resistance and defended support; the next break matters."
 	}
-	if len(setups) > 0 && setups[0].Kind == "compression_breakout" {
+
+	if setups[0].Kind == "compression_breakout" {
 		return "Bullish context: price has broken out of a converging compression after a pullback."
 	}
-	if len(setups) > 0 && setups[0].Kind == "compression_breakdown" {
+
+	if setups[0].Kind == "compression_breakdown" {
 		return "Bearish warning: price has broken below converging support, weakening the dip-buying setup."
 	}
+
 	switch bias {
 	case "bullish":
 		return "Bullish context: price has reclaimed an important support/moving-average area after a pullback."
+
 	case "bearish":
 		return "Bearish context. Reclaiming the failed level is needed before the setup improves."
+
 	case "decision":
 		return "Decision zone: price is testing support after a sharp rejection, so confirmation matters more than the current indicator bias."
+
 	default:
 		if recentLow > 0 && recentHigh > 0 {
 			return "Decision zone: price is reacting around an important level after a recent expansion."
 		}
+
 		return "Decision zone: wait for confirmation from the active setup."
 	}
+
 }
 
 func rsiValue(avgGain, avgLoss float64) float64 {
