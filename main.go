@@ -1484,6 +1484,7 @@ func calcChartPivotStructures(candles []ChartCandle, pivots []ChartPivot, kind s
 			candidates = append(candidates, p)
 		}
 	}
+	candidates = appendRecentEdgePivots(candidates, candles, pivotKind, firstTime)
 	if len(candidates) < 2 {
 		return nil
 	}
@@ -1513,6 +1514,11 @@ func calcChartPivotStructures(candles []ChartCandle, pivots []ChartPivot, kind s
 			best = seq
 		}
 	}
+	recentPair := chartPivotStructureRecentAdjacentPair(candidates, kind, lastRecentTime)
+	if len(recentPair) >= 2 &&
+		(len(best) < 2 || recentPair[1].Time > best[len(best)-1].Time) {
+		best = recentPair
+	}
 	if len(best) < 2 {
 		return nil
 	}
@@ -1541,6 +1547,100 @@ func calcChartPivotStructures(candles []ChartCandle, pivots []ChartPivot, kind s
 		})
 	}
 	return out
+}
+
+func chartPivotStructureRecentAdjacentPair(candidates []ChartPivot, kind string, lastRecentTime int64) []ChartPivot {
+	if len(candidates) < 2 {
+		return nil
+	}
+	direction := chartPivotStructureDirection(kind)
+	if direction == "" {
+		return nil
+	}
+	for i := len(candidates) - 1; i > 0; i-- {
+		current := candidates[i]
+		previous := candidates[i-1]
+		if current.Time < lastRecentTime {
+			break
+		}
+		if chartPivotStructureRecentPairContinues(current, previous, direction) ||
+			chartPivotIsTimeframeExtreme(current, candidates[:i], kind) {
+			return []ChartPivot{previous, current}
+		}
+	}
+	return nil
+}
+
+func chartPivotStructureDirection(kind string) string {
+	switch kind {
+	case "lower_high", "lower_low":
+		return "lower"
+	case "higher_high", "higher_low":
+		return "higher"
+	default:
+		return ""
+	}
+}
+
+func chartPivotStructureRecentPairContinues(candidate, previous ChartPivot, direction string) bool {
+	switch direction {
+	case "lower":
+		return candidate.Price <= previous.Price*0.997
+	case "higher":
+		return candidate.Price >= previous.Price*1.003
+	default:
+		return false
+	}
+}
+
+func appendRecentEdgePivots(candidates []ChartPivot, candles []ChartCandle, pivotKind string, firstTime int64) []ChartPivot {
+	if len(candles) < 8 {
+		return candidates
+	}
+	existing := make(map[int64]bool, len(candidates))
+	for _, p := range candidates {
+		existing[p.Time] = true
+	}
+	start := maxInt(4, len(candles)-24)
+	for i := start; i < len(candles)-1; i++ {
+		c := candles[i]
+		if c.Time < firstTime || existing[c.Time] {
+			continue
+		}
+		left := 4
+		right := minInt(2, len(candles)-1-i)
+		if right < 1 {
+			continue
+		}
+		isPivot := true
+		for j := i - left; j <= i+right; j++ {
+			if j == i {
+				continue
+			}
+			if pivotKind == "high" && candles[j].High >= c.High {
+				isPivot = false
+				break
+			}
+			if pivotKind == "low" && candles[j].Low <= c.Low {
+				isPivot = false
+				break
+			}
+		}
+		if !isPivot {
+			continue
+		}
+		price := c.High
+		if pivotKind == "low" {
+			price = c.Low
+		}
+		candidates = append(candidates, ChartPivot{
+			Time:  c.Time,
+			Kind:  pivotKind,
+			Price: price,
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Time < candidates[j].Time })
+	return candidates
 }
 
 func chartPivotStructureSpec(kind string) (string, string, bool) {
