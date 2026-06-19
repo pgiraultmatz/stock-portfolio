@@ -602,6 +602,14 @@ type ChartLevel struct {
 	Touches  []int64 `json:"touches"`
 }
 
+type ChartPivotStructure struct {
+	Kind    string  `json:"kind"`
+	Time    int64   `json:"time"`
+	EndTime int64   `json:"endTime"`
+	Price   float64 `json:"price"`
+	Index   int     `json:"index"`
+}
+
 type ChartDivergence struct {
 	Kind      string  `json:"kind"`
 	FromTime  int64   `json:"fromTime"`
@@ -692,6 +700,10 @@ type ChartResponse struct {
 	MACD         []ChartMACDPoint      `json:"macd"`
 	Pivots       []ChartPivot          `json:"pivots"`
 	Levels       []ChartLevel          `json:"levels"`
+	LowerHighs   []ChartPivotStructure `json:"lowerHighs"`
+	LowerLows    []ChartPivotStructure `json:"lowerLows"`
+	HigherHighs  []ChartPivotStructure `json:"higherHighs"`
+	HigherLows   []ChartPivotStructure `json:"higherLows"`
 	Divergences  []ChartDivergence     `json:"divergences"`
 	Channels     []ChartChannel        `json:"channels"`
 	Compressions []ChartCompression    `json:"compressions"`
@@ -803,8 +815,8 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	fetchRange := chartFetchRange(rng, interval)
 	cachePath := chartCachePath(symbol, fetchRange, interval)
 	if cached, ok := loadChartCache(cachePath, ttl); ok && !cached.Stale {
-		cached = trimChartResponse(cached, rng, interval, maMode)
 		applyCurrentDailyCandle(r.Context(), &cached)
+		cached = trimChartResponse(cached, rng, interval, maMode)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(cached)
 		return
@@ -814,8 +826,8 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if cached, ok := loadChartCache(cachePath, ttl); ok {
 			cached.Stale = true
-			cached = trimChartResponse(cached, rng, interval, maMode)
 			applyCurrentDailyCandle(r.Context(), &cached)
+			cached = trimChartResponse(cached, rng, interval, maMode)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(cached)
 			return
@@ -828,8 +840,8 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	cr.UpdatedAt = time.Now()
 	cr.ValidUntil = cr.UpdatedAt.Add(ttl)
 	saveChartCache(cachePath, cr)
-	cr = trimChartResponse(cr, rng, interval, maMode)
 	applyCurrentDailyCandle(r.Context(), &cr)
+	cr = trimChartResponse(cr, rng, interval, maMode)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(cr)
 }
@@ -838,8 +850,8 @@ func trimChartResponse(cr ChartResponse, displayRange, interval, maMode string) 
 	cr.Range = displayRange
 	cr.Interval = interval
 	cr.MAMode = normalizeMAMode(maMode)
+	enrichChartIndicators(&cr)
 	if displayRange == "max" || len(cr.Candles) == 0 {
-		enrichChartIndicators(&cr)
 		ma50, ma100, ma200 := activeMALines(cr)
 		cr.Divergences = filterDivergencesByContext(cr.Divergences, cr.Candles, ma50, ma100, ma200, cr.Levels)
 		cr.Analysis = calcChartAnalysis(cr)
@@ -873,6 +885,10 @@ func trimChartResponse(cr ChartResponse, displayRange, interval, maMode string) 
 	cr.MACD = filterMACD(cr.MACD)
 	cr.Pivots = filterPivots(cr.Pivots)
 	cr.Levels = calcChartLevels(cr.Pivots)
+	cr.LowerHighs = calcChartPivotStructures(cr.Candles, cr.Pivots, "lower_high")
+	cr.LowerLows = calcChartPivotStructures(cr.Candles, cr.Pivots, "lower_low")
+	cr.HigherHighs = calcChartPivotStructures(cr.Candles, cr.Pivots, "higher_high")
+	cr.HigherLows = calcChartPivotStructures(cr.Candles, cr.Pivots, "higher_low")
 	cr.Divergences = calcRSIDivergences(cr.Candles, cr.Pivots)
 	ma50, ma100, ma200 := activeMALines(cr)
 	cr.Divergences = filterDivergencesByContext(cr.Divergences, cr.Candles, ma50, ma100, ma200, cr.Levels)
@@ -1116,6 +1132,10 @@ func recomputeChartIndicators(cr *ChartResponse) {
 	cr.MACD = nil
 	cr.Pivots = nil
 	cr.Levels = nil
+	cr.LowerHighs = nil
+	cr.LowerLows = nil
+	cr.HigherHighs = nil
+	cr.HigherLows = nil
 	cr.Divergences = nil
 	cr.Channels = nil
 	cr.Compressions = nil
@@ -1175,6 +1195,10 @@ func enrichChartIndicators(cr *ChartResponse) {
 	if len(cr.Levels) == 0 {
 		cr.Levels = calcChartLevels(cr.Pivots)
 	}
+	cr.LowerHighs = calcChartPivotStructures(cr.Candles, cr.Pivots, "lower_high")
+	cr.LowerLows = calcChartPivotStructures(cr.Candles, cr.Pivots, "lower_low")
+	cr.HigherHighs = calcChartPivotStructures(cr.Candles, cr.Pivots, "higher_high")
+	cr.HigherLows = calcChartPivotStructures(cr.Candles, cr.Pivots, "higher_low")
 	cr.Divergences = calcRSIDivergences(cr.Candles, cr.Pivots)
 	ma50, ma100, ma200 := activeMALines(*cr)
 	cr.Divergences = filterDivergencesByContext(cr.Divergences, cr.Candles, ma50, ma100, ma200, cr.Levels)
@@ -1437,6 +1461,260 @@ func chartLevelTolerance(pivots []ChartPivot) float64 {
 		maxP = math.Max(maxP, p.Price)
 	}
 	return math.Max((maxP-minP)*0.012, maxP*0.004)
+}
+
+func calcChartPivotStructures(candles []ChartCandle, pivots []ChartPivot, kind string) []ChartPivotStructure {
+	if len(candles) < 40 || len(pivots) < 2 {
+		return nil
+	}
+	pivotKind, direction, ok := chartPivotStructureSpec(kind)
+	if !ok {
+		return nil
+	}
+	firstTime := candles[maxInt(0, len(candles)-160)].Time
+	lastRecentTime := candles[maxInt(0, len(candles)-80)].Time
+	indexByTime := make(map[int64]int, len(candles))
+	for i, c := range candles {
+		indexByTime[c.Time] = i
+	}
+
+	var candidates []ChartPivot
+	for _, p := range pivots {
+		if p.Kind == pivotKind && p.Time >= firstTime && p.Price > 0 {
+			candidates = append(candidates, p)
+		}
+	}
+	if len(candidates) < 2 {
+		return nil
+	}
+
+	var best []ChartPivot
+	bestScore := -1
+	for i := 0; i < len(candidates)-1; i++ {
+		seq := []ChartPivot{candidates[i]}
+		last := candidates[i]
+		for j := i + 1; j < len(candidates); j++ {
+			if chartPivotStructureContinues(candidates[j], last, direction) ||
+				chartPivotIsTimeframeExtreme(candidates[j], candidates[:j], kind) {
+				seq = append(seq, candidates[j])
+				last = candidates[j]
+			}
+		}
+		if len(seq) < 2 {
+			continue
+		}
+		latest := seq[len(seq)-1]
+		if latest.Time < lastRecentTime {
+			continue
+		}
+		score := len(seq)*100 + indexByTime[latest.Time]
+		if score > bestScore {
+			bestScore = score
+			best = seq
+		}
+	}
+	if len(best) < 2 {
+		return nil
+	}
+	if len(best) > 5 {
+		best = best[len(best)-5:]
+	}
+
+	out := make([]ChartPivotStructure, 0, len(best))
+	for i, p := range best {
+		idx, ok := indexByTime[p.Time]
+		if !ok {
+			continue
+		}
+		endIdx := minInt(len(candles)-1, idx+12)
+		if i+1 < len(best) {
+			if nextIdx, ok := indexByTime[best[i+1].Time]; ok {
+				endIdx = minInt(endIdx, maxInt(idx+4, nextIdx))
+			}
+		}
+		out = append(out, ChartPivotStructure{
+			Kind:    kind,
+			Time:    p.Time,
+			EndTime: candles[endIdx].Time,
+			Price:   p.Price,
+			Index:   i + 1,
+		})
+	}
+	return out
+}
+
+func chartPivotStructureSpec(kind string) (string, string, bool) {
+	switch kind {
+	case "lower_high":
+		return "high", "lower", true
+	case "lower_low":
+		return "low", "lower", true
+	case "higher_high":
+		return "high", "higher", true
+	case "higher_low":
+		return "low", "higher", true
+	default:
+		return "", "", false
+	}
+}
+
+func chartPivotStructureContinues(candidate, previous ChartPivot, direction string) bool {
+	switch direction {
+	case "lower":
+		return candidate.Price <= previous.Price*0.985
+	case "higher":
+		return candidate.Price >= previous.Price*1.015
+	default:
+		return false
+	}
+}
+
+func chartPivotIsTimeframeExtreme(candidate ChartPivot, previous []ChartPivot, kind string) bool {
+	if len(previous) == 0 || candidate.Price <= 0 {
+		return false
+	}
+	switch kind {
+	case "higher_high":
+		for _, p := range previous {
+			if p.Price >= candidate.Price {
+				return false
+			}
+		}
+		return true
+	case "lower_low":
+		for _, p := range previous {
+			if p.Price <= candidate.Price {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func chartPivotStructureCurrentInvalidated(lastClose, price float64, kind string) bool {
+	switch kind {
+	case "lower_high", "lower_low":
+		return lastClose > price*1.015
+	case "higher_high", "higher_low":
+		return lastClose < price*0.985
+	default:
+		return true
+	}
+}
+
+func chartPivotStructureInvalidatedAfter(candles []ChartCandle, pivot ChartPivot, kind string) bool {
+	if pivot.Time == 0 || pivot.Price <= 0 {
+		return false
+	}
+	for _, c := range candles {
+		if c.Time <= pivot.Time {
+			continue
+		}
+		if chartPivotStructureCurrentInvalidated(c.Close, pivot.Price, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func chartPivotStructureSetups(
+	candles []ChartCandle,
+	lastClose float64,
+	sma50 float64,
+	hasSMA50 bool,
+	lowerHighs,
+	lowerLows,
+	higherHighs,
+	higherLows []ChartPivotStructure,
+) []ChartSetup {
+	var setups []ChartSetup
+	structures := []struct {
+		items           []ChartPivotStructure
+		kind            string
+		title           string
+		bias            string
+		detail          string
+		positiveOutcome string
+		negativeOutcome string
+	}{
+		{
+			items:           lowerHighs,
+			kind:            "lower_highs_pressure",
+			title:           "Lower highs pressure",
+			bias:            "bearish",
+			detail:          "Recent rebounds are failing below prior pivot highs, showing descending resistance pressure.",
+			positiveOutcome: "A reclaim of the latest lower high would invalidate the pressure and improve the structure.",
+			negativeOutcome: "Failure below the latest lower high keeps downside pressure active toward nearby support.",
+		},
+		{
+			items:           lowerLows,
+			kind:            "lower_lows_pressure",
+			title:           "Lower lows pressure",
+			bias:            "bearish",
+			detail:          "Recent selloffs are breaking below prior pivot lows, showing downside continuation pressure.",
+			positiveOutcome: "A reclaim of the latest lower low would reduce downside pressure and improve the structure.",
+			negativeOutcome: "Failure below the latest lower low keeps the downtrend structure active.",
+		},
+		{
+			items:           higherHighs,
+			kind:            "higher_highs_momentum",
+			title:           "Higher highs momentum",
+			bias:            "bullish",
+			detail:          "Recent pushes are breaking above prior pivot highs, showing upside continuation pressure.",
+			positiveOutcome: "Holding above the latest higher high keeps trend-continuation pressure active.",
+			negativeOutcome: "A loss of the latest higher high would weaken the breakout structure.",
+		},
+		{
+			items:           higherLows,
+			kind:            "higher_lows_support",
+			title:           "Higher lows support",
+			bias:            "bullish",
+			detail:          "Recent pullbacks are holding above prior pivot lows, showing rising support.",
+			positiveOutcome: "Holding the latest higher low keeps the constructive support structure intact.",
+			negativeOutcome: "A break below the latest higher low would invalidate the rising-support structure.",
+		},
+	}
+	for _, s := range structures {
+		if len(s.items) < 2 {
+			continue
+		}
+		latest := s.items[len(s.items)-1]
+		pivot := ChartPivot{Time: latest.Time, Price: latest.Price}
+		sourceKind := latest.Kind
+		if latest.Price <= 0 ||
+			chartPivotStructureCurrentInvalidated(lastClose, latest.Price, sourceKind) ||
+			chartPivotStructureInvalidatedAfter(candles, pivot, sourceKind) {
+			continue
+		}
+		confidence := "watch"
+		if hasSMA50 {
+			if strings.Contains(s.bias, "bearish") && lastClose < sma50 {
+				confidence = "medium"
+			}
+			if strings.Contains(s.bias, "bullish") && lastClose > sma50 {
+				confidence = "medium"
+			}
+		}
+		invalidation := latest.Price * 1.015
+		if strings.Contains(s.bias, "bullish") {
+			invalidation = latest.Price * 0.985
+		}
+		setups = append(setups, ChartSetup{
+			Kind:              s.kind,
+			Title:             s.title,
+			Bias:              s.bias,
+			Confidence:        confidence,
+			Detail:            s.detail,
+			TriggerTime:       latest.Time,
+			TriggerPrice:      latest.Price,
+			InvalidationPrice: invalidation,
+			PositiveOutcome:   s.positiveOutcome,
+			NegativeOutcome:   s.negativeOutcome,
+		})
+	}
+	return setups
 }
 
 func calcRSIDivergences(candles []ChartCandle, pivots []ChartPivot) []ChartDivergence {
@@ -2004,6 +2282,13 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func minInt64(a, b int64) int64 {
 	if a < b {
 		return a
@@ -2355,6 +2640,17 @@ func calcChartAnalysis(cr ChartResponse) ChartAnalysis {
 			NegativeOutcome: "Continued bearish alignment increases the risk that rallies remain temporary rebounds.",
 		})
 	}
+
+	setups = append(setups, chartPivotStructureSetups(
+		candles,
+		lastClose,
+		latestSMA50,
+		hasSMA50,
+		cr.LowerHighs,
+		cr.LowerLows,
+		cr.HigherHighs,
+		cr.HigherLows,
+	)...)
 
 	/*
 		Reclaim spécifique de la moyenne mobile 200.
@@ -3145,6 +3441,8 @@ func chartSetupPriority(setup ChartSetup) int {
 		return 40
 	case "high_volume_bullish_reversal", "high_volume_selloff", "macd_bullish_cross":
 		return 45
+	case "lower_highs_pressure", "lower_lows_pressure", "higher_highs_momentum", "higher_lows_support":
+		return 46
 	case "macd_momentum_recovery", "macd_momentum_fading":
 		return 55
 	case "channel_breakout", "channel_breakdown":
@@ -3336,6 +3634,22 @@ func chartAnalysisSummary(
 		return "Bullish watch: price has reclaimed " +
 			ma100 +
 			" support, but higher moving averages may still cap the rebound."
+	}
+
+	if setups[0].Kind == "lower_highs_pressure" {
+		return "Bearish pressure: recent rebounds are failing under a descending lower-high structure."
+	}
+
+	if setups[0].Kind == "lower_lows_pressure" {
+		return "Bearish pressure: recent selloffs are breaking into a descending lower-low structure."
+	}
+
+	if setups[0].Kind == "higher_highs_momentum" {
+		return "Bullish momentum: recent pushes are breaking into a rising higher-high structure."
+	}
+
+	if setups[0].Kind == "higher_lows_support" {
+		return "Bullish support: recent pullbacks are holding a rising higher-low structure."
 	}
 
 	if setups[0].Kind == "converging_compression" {

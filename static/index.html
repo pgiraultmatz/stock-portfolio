@@ -1795,6 +1795,10 @@ function drawChart(data) {
   drawMovingAverage(ctx, ma50, indexByTime, x, y, '#58a6ff', `${maLabel} 50`, pad.left, pad.top + 12);
   drawMovingAverage(ctx, ma100, indexByTime, x, y, '#d29922', `${maLabel} 100`, pad.left + 76, pad.top + 12);
   drawMovingAverage(ctx, ma200, indexByTime, x, y, '#db61a2', `${maLabel} 200`, pad.left + 160, pad.top + 12);
+  drawChartPivotStructures(ctx, data.lowerHighs || [], indexByTime, x, y);
+  drawChartPivotStructures(ctx, data.lowerLows || [], indexByTime, x, y);
+  drawChartPivotStructures(ctx, data.higherHighs || [], indexByTime, x, y);
+  drawChartPivotStructures(ctx, data.higherLows || [], indexByTime, x, y);
   drawChartDivergences(ctx, data.divergences || [], indexByTime, x, y);
   drawChartDateAxis(ctx, candles, pad, w, dateAxisTop, dateAxisH);
   drawMACDPanel(ctx, data.macd || [], candles, x, bodyW, pad, w, macdTop, macdH);
@@ -2217,6 +2221,36 @@ function drawChartDivergences(ctx, divs, indexByTime, x, y) {
     ctx.beginPath();
     ctx.arc(x1, y1, 3, 0, Math.PI * 2);
     ctx.arc(x2, y2, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawChartPivotStructures(ctx, structures, indexByTime, x, y) {
+  if (!structures || structures.length < 2) return;
+  const kind = structures[structures.length - 1]?.kind || '';
+  const bullish = kind.startsWith('higher_');
+  const color = bullish ? '#3fb950' : '#f85149';
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = bullish ? 'rgba(63,185,80,.76)' : 'rgba(248,81,73,.78)';
+  ctx.fillStyle = color;
+  for (const structure of structures) {
+    const startIdx = indexByTime.get(structure.time);
+    const endIdx = indexByTime.get(structure.endTime);
+    if (startIdx == null || endIdx == null || !Number.isFinite(structure.price)) continue;
+    const yy = y(structure.price);
+    const pivotX = x(startIdx);
+    const endX = x(Math.max(startIdx + 1, endIdx));
+    const halfW = Math.max(18, Math.abs(endX - pivotX) / 2);
+    const x1 = pivotX - halfW;
+    const x2 = pivotX + halfW;
+    ctx.beginPath();
+    ctx.moveTo(x1, yy);
+    ctx.lineTo(x2, yy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(pivotX, yy, 3.5, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
