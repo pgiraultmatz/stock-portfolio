@@ -503,6 +503,13 @@
     .charts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
     .charts-title { font-size: 16px; font-weight: 700; color: #e6edf3; }
     .charts-meta { font-size: 12px; color: #8b949e; }
+    .charts-extended { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 1px 6px; border: 1px solid #30363d; border-radius: 999px; background: #161b22; color: #c9d1d9; font-family: 'SF Mono', monospace; font-size: 10px; vertical-align: middle; }
+    .charts-extended.pre { border-color: rgba(210,153,34,.45); color: #d29922; }
+    .charts-extended.post { border-color: rgba(88,166,255,.45); color: #58a6ff; }
+    .charts-watch-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
+    .charts-watch-extended { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; color: #8b949e; font-family: 'SF Mono', monospace; font-size: 9px; line-height: 1.1; white-space: nowrap; }
+    .charts-watch-extended.pre { color: #d29922; }
+    .charts-watch-extended.post { color: #58a6ff; }
     .charts-analysis { display: none; grid-template-columns: 190px minmax(0, 1fr); gap: 12px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #21262d; border-radius: 6px; background: #090d13; }
     .charts-analysis.show { display: grid; }
     .charts-analysis-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -890,7 +897,7 @@
             <option value="ema">EMA</option>
           </select>
           <button id="charts-fib-toggle" class="charts-toggle active" onclick="toggleChartFibs()" title="Toggle Fibonacci retracements">Fib</button>
-          <button class="btn btn-primary" onclick="loadChart()">Load</button>
+          <button class="btn btn-primary" onclick="loadChart({ refresh: true })">Load</button>
         </div>
         <div class="charts-panel">
           <div class="charts-head">
@@ -1621,6 +1628,7 @@ function renderChartsWatchRow(stock, active) {
   const cls = change == null ? '' : change >= 0 ? 'charts-watch-up' : 'charts-watch-down';
   const sign = change != null && change >= 0 ? '+' : '';
   const price = q ? formatPrice(q.price, q.currency) : '—';
+  const extended = q ? formatExtendedMarketBadge(q.extendedMarket, q.currency, { compact: true }) : '';
   const chg = change == null ? '—' : `${sign}${change.toFixed(2)}%`;
   return `<div class="charts-watch-row${ticker === active ? ' active' : ''}" onclick='selectChartSymbol(${JSON.stringify(ticker)})' title="${esc(stock.name || ticker)}">
     <div class="charts-watch-symbol">
@@ -1630,7 +1638,7 @@ function renderChartsWatchRow(stock, active) {
         <div class="charts-watch-company">${esc(stock.name || '')}</div>
       </div>
     </div>
-    <div class="charts-watch-num">${price || '—'}</div>
+    <div class="charts-watch-num charts-watch-price"><span>${price || '—'}</span>${extended}</div>
     <div class="charts-watch-num ${cls}">${chg}</div>
   </div>`;
 }
@@ -1642,7 +1650,7 @@ function selectChartSymbol(ticker) {
   loadChart();
 }
 
-async function loadChart() {
+async function loadChart(options = {}) {
   const symbolEl = document.getElementById('charts-symbol');
   const rangeEl = document.getElementById('charts-range');
   const intervalEl = document.getElementById('charts-interval');
@@ -1663,11 +1671,19 @@ async function loadChart() {
   if (meta) meta.textContent = 'Loading…';
   if (empty) empty.style.display = 'grid';
   try {
-    const res = await fetch(`/api/charts?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&ma=${encodeURIComponent(chartMAMode)}`);
+    const params = new URLSearchParams({
+      symbol,
+      range,
+      interval,
+      ma: chartMAMode
+    });
+    if (options.refresh) params.set('refresh', '1');
+    const res = await fetch(`/api/charts?${params.toString()}`);
     if (!res.ok) throw new Error(await res.text());
     chartData = await res.json();
     renderChartsWatchlist();
     drawChart(chartData);
+    if (options.refresh) fetchQuotes(true);
   } catch (err) {
     if (meta) meta.textContent = `Load failed${err && err.message ? `: ${err.message.trim()}` : ''}`;
   }
@@ -1818,8 +1834,9 @@ function drawChart(data) {
   ].filter(([, s]) => s && s.length).map(([label, s]) => `${label} ${formatChartPrice(s[s.length - 1].value, data.currency)}`).join(' · ');
   const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleString('fr-FR') : '';
   const cacheLabel = data.cached ? (data.stale ? 'stale cache' : 'cache') : 'fresh';
+  const extendedBadge = formatExtendedMarketBadge(data.extendedMarket, data.currency);
   if (meta) {
-    meta.innerHTML = `${candles.length} candles · ${data.interval} · ${formatChartPrice(last.close, data.currency)} · <span class="${change >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span> · Vol ${formatVolume(last.volume || 0)}${latestRSI == null ? '' : ` · RSI 14 ${latestRSI.toFixed(1)}`}${latestMACD == null ? '' : ` · MACD ${formatIndicator(latestMACD.macd)}/${formatIndicator(latestMACD.signal)}`}${latestSMA ? ` · ${latestSMA}` : ''} · ${cacheLabel}${updated ? ` · ${updated}` : ''}`;
+    meta.innerHTML = `${candles.length} candles · ${data.interval} · ${formatChartPrice(last.close, data.currency)}${extendedBadge} · <span class="${change >= 0 ? 'perf-mc-pos' : 'perf-mc-neg'}">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span> · Vol ${formatVolume(last.volume || 0)}${latestRSI == null ? '' : ` · RSI 14 ${latestRSI.toFixed(1)}`}${latestMACD == null ? '' : ` · MACD ${formatIndicator(latestMACD.macd)}/${formatIndicator(latestMACD.signal)}`}${latestSMA ? ` · ${latestSMA}` : ''} · ${cacheLabel}${updated ? ` · ${updated}` : ''}`;
   }
   if (chartHover) drawChartCrosshair(ctx, chartHover);
 }
@@ -2471,6 +2488,22 @@ function formatChartPrice(v, currency) {
   const sym = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'CHF ' }[currency] || '';
   const digits = v >= 1000 ? 0 : v >= 10 ? 2 : 4;
   return sym + Number(v).toLocaleString('en-US', { maximumFractionDigits: digits });
+}
+
+function formatExtendedMarketBadge(extended, currency, options = {}) {
+  if (!extended || !Number.isFinite(Number(extended.price)) || Number(extended.price) <= 0) return '';
+  const session = extended.session === 'pre' ? 'pre' : 'post';
+  const icon = session === 'pre' ? '☀' : '☾';
+  const label = session === 'pre' ? 'PRE' : 'POST';
+  const price = formatChartPrice(Number(extended.price), currency);
+  const pct = Number(extended.changePercent);
+  const moveCls = Number.isFinite(pct) && pct < 0 ? 'perf-mc-neg' : 'perf-mc-pos';
+  const cls = options.compact ? 'charts-watch-extended' : 'charts-extended';
+  const pctHtml = Number.isFinite(pct) && pct !== 0
+    ? ` <span class="${moveCls}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</span>`
+    : '';
+  const sessionText = options.compact ? icon : `${icon} ${label}`;
+  return `<span class="${cls} ${session}" title="${esc(label)} market"><span>${esc(sessionText)}</span> <span class="${moveCls}">${esc(price)}</span>${pctHtml}</span>`;
 }
 
 function formatChartDate(ts) {

@@ -476,24 +476,21 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type quoteResult struct {
-		Price    float64 `json:"price"`
-		Change   float64 `json:"change"`
-		Currency string  `json:"currency"`
-		Stale    bool    `json:"stale"`
-	}
-	type chartMeta struct {
-		RegularMarketPrice float64 `json:"regularMarketPrice"`
-		ChartPreviousClose float64 `json:"chartPreviousClose"`
-		Currency           string  `json:"currency"`
+		Price          float64              `json:"price"`
+		Change         float64              `json:"change"`
+		Currency       string               `json:"currency"`
+		Stale          bool                 `json:"stale"`
+		ExtendedMarket *ChartExtendedMarket `json:"extendedMarket,omitempty"`
 	}
 	type chartResp struct {
 		Chart struct {
 			Result []struct {
-				Meta       chartMeta `json:"meta"`
-				Timestamp  []int64   `json:"timestamp"`
+				Meta       yahooChartMeta `json:"meta"`
+				Timestamp  []int64        `json:"timestamp"`
 				Indicators struct {
 					Quote []struct {
-						Open []float64 `json:"open"`
+						Open  []float64  `json:"open"`
+						Close []*float64 `json:"close"`
 					} `json:"quote"`
 				} `json:"indicators"`
 			} `json:"result"`
@@ -514,7 +511,7 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(ticker string) {
 			defer wg.Done()
-			yahooURL := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(ticker) + "?range=1d&interval=5m"
+			yahooURL := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(ticker) + "?range=2d&interval=5m&includePrePost=true"
 			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, yahooURL, nil)
 			if err != nil {
 				return
@@ -538,7 +535,7 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 			}
 			res := cr.Chart.Result[0]
 			currentPrice := res.Meta.RegularMarketPrice
-			refPrice := res.Meta.ChartPreviousClose
+			refPrice := yahooChartReferenceClose(res.Meta)
 			if refPrice == 0 && len(res.Indicators.Quote) > 0 && len(res.Indicators.Quote[0].Open) > 0 {
 				refPrice = res.Indicators.Quote[0].Open[0]
 			}
@@ -553,10 +550,11 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 			}
 			mu.Lock()
 			results[ticker] = quoteResult{
-				Price:    currentPrice,
-				Change:   (currentPrice - refPrice) / refPrice * 100,
-				Currency: res.Meta.Currency,
-				Stale:    stale,
+				Price:          currentPrice,
+				Change:         (currentPrice - refPrice) / refPrice * 100,
+				Currency:       res.Meta.Currency,
+				Stale:          stale,
+				ExtendedMarket: chartExtendedMarketFromIntraday(res.Meta, res.Timestamp, res.Indicators.Quote[0].Close),
 			}
 			mu.Unlock()
 		}(t)
@@ -574,6 +572,39 @@ type ChartCandle struct {
 	Low    float64 `json:"low"`
 	Close  float64 `json:"close"`
 	Volume int64   `json:"volume"`
+}
+
+type yahooChartMeta struct {
+	Symbol                     string  `json:"symbol"`
+	Currency                   string  `json:"currency"`
+	RegularMarketPrice         float64 `json:"regularMarketPrice"`
+	RegularMarketPreviousClose float64 `json:"regularMarketPreviousClose"`
+	PreviousClose              float64 `json:"previousClose"`
+	ChartPreviousClose         float64 `json:"chartPreviousClose"`
+	MarketState                string  `json:"marketState"`
+	PreMarketPrice             float64 `json:"preMarketPrice"`
+	PreMarketChange            float64 `json:"preMarketChange"`
+	PreMarketChangePercent     float64 `json:"preMarketChangePercent"`
+	PreMarketTime              int64   `json:"preMarketTime"`
+	PostMarketPrice            float64 `json:"postMarketPrice"`
+	PostMarketChange           float64 `json:"postMarketChange"`
+	PostMarketChangePercent    float64 `json:"postMarketChangePercent"`
+	PostMarketTime             int64   `json:"postMarketTime"`
+	CurrentTradingPeriod       struct {
+		Pre     yahooTradingPeriod `json:"pre"`
+		Regular yahooTradingPeriod `json:"regular"`
+		Post    yahooTradingPeriod `json:"post"`
+	} `json:"currentTradingPeriod"`
+	TradingPeriods struct {
+		Pre     [][]yahooTradingPeriod `json:"pre"`
+		Regular [][]yahooTradingPeriod `json:"regular"`
+		Post    [][]yahooTradingPeriod `json:"post"`
+	} `json:"tradingPeriods"`
+}
+
+type yahooTradingPeriod struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
 }
 
 type ChartLinePoint struct {
@@ -683,36 +714,184 @@ type ChartAnalysis struct {
 	Setups  []ChartSetup `json:"setups"`
 }
 
+type ChartExtendedMarket struct {
+	Session       string  `json:"session"`
+	MarketState   string  `json:"marketState,omitempty"`
+	Price         float64 `json:"price"`
+	Change        float64 `json:"change,omitempty"`
+	ChangePercent float64 `json:"changePercent,omitempty"`
+	Time          int64   `json:"time,omitempty"`
+}
+
 type ChartResponse struct {
-	Symbol       string                `json:"symbol"`
-	Range        string                `json:"range"`
-	Interval     string                `json:"interval"`
-	Currency     string                `json:"currency"`
-	Candles      []ChartCandle         `json:"candles"`
-	RSI14        []ChartLinePoint      `json:"rsi14"`
-	MAMode       string                `json:"maMode"`
-	SMA50        []ChartLinePoint      `json:"sma50"`
-	SMA100       []ChartLinePoint      `json:"sma100"`
-	SMA200       []ChartLinePoint      `json:"sma200"`
-	EMA50        []ChartLinePoint      `json:"ema50"`
-	EMA100       []ChartLinePoint      `json:"ema100"`
-	EMA200       []ChartLinePoint      `json:"ema200"`
-	MACD         []ChartMACDPoint      `json:"macd"`
-	Pivots       []ChartPivot          `json:"pivots"`
-	Levels       []ChartLevel          `json:"levels"`
-	LowerHighs   []ChartPivotStructure `json:"lowerHighs"`
-	LowerLows    []ChartPivotStructure `json:"lowerLows"`
-	HigherHighs  []ChartPivotStructure `json:"higherHighs"`
-	HigherLows   []ChartPivotStructure `json:"higherLows"`
-	Divergences  []ChartDivergence     `json:"divergences"`
-	Channels     []ChartChannel        `json:"channels"`
-	Compressions []ChartCompression    `json:"compressions"`
-	Fibs         []ChartFibRetracement `json:"fibs"`
-	Analysis     ChartAnalysis         `json:"analysis"`
-	Cached       bool                  `json:"cached"`
-	Stale        bool                  `json:"stale"`
-	UpdatedAt    time.Time             `json:"updatedAt"`
-	ValidUntil   time.Time             `json:"validUntil"`
+	Symbol         string                `json:"symbol"`
+	Range          string                `json:"range"`
+	Interval       string                `json:"interval"`
+	Currency       string                `json:"currency"`
+	ExtendedMarket *ChartExtendedMarket  `json:"extendedMarket,omitempty"`
+	Candles        []ChartCandle         `json:"candles"`
+	RSI14          []ChartLinePoint      `json:"rsi14"`
+	MAMode         string                `json:"maMode"`
+	SMA50          []ChartLinePoint      `json:"sma50"`
+	SMA100         []ChartLinePoint      `json:"sma100"`
+	SMA200         []ChartLinePoint      `json:"sma200"`
+	EMA50          []ChartLinePoint      `json:"ema50"`
+	EMA100         []ChartLinePoint      `json:"ema100"`
+	EMA200         []ChartLinePoint      `json:"ema200"`
+	MACD           []ChartMACDPoint      `json:"macd"`
+	Pivots         []ChartPivot          `json:"pivots"`
+	Levels         []ChartLevel          `json:"levels"`
+	LowerHighs     []ChartPivotStructure `json:"lowerHighs"`
+	LowerLows      []ChartPivotStructure `json:"lowerLows"`
+	HigherHighs    []ChartPivotStructure `json:"higherHighs"`
+	HigherLows     []ChartPivotStructure `json:"higherLows"`
+	Divergences    []ChartDivergence     `json:"divergences"`
+	Channels       []ChartChannel        `json:"channels"`
+	Compressions   []ChartCompression    `json:"compressions"`
+	Fibs           []ChartFibRetracement `json:"fibs"`
+	Analysis       ChartAnalysis         `json:"analysis"`
+	Cached         bool                  `json:"cached"`
+	Stale          bool                  `json:"stale"`
+	UpdatedAt      time.Time             `json:"updatedAt"`
+	ValidUntil     time.Time             `json:"validUntil"`
+}
+
+func chartExtendedMarketFromMeta(meta yahooChartMeta) *ChartExtendedMarket {
+	state := strings.ToUpper(strings.TrimSpace(meta.MarketState))
+	if meta.PreMarketPrice > 0 && (state == "PRE" || meta.PostMarketPrice <= 0) {
+		change := firstNonZero(meta.PreMarketChange, meta.PreMarketPrice-meta.RegularMarketPrice)
+		changePercent := firstNonZero(meta.PreMarketChangePercent, percentChange(meta.PreMarketPrice, meta.RegularMarketPrice))
+		return &ChartExtendedMarket{
+			Session:       "pre",
+			MarketState:   state,
+			Price:         meta.PreMarketPrice,
+			Change:        change,
+			ChangePercent: changePercent,
+			Time:          meta.PreMarketTime,
+		}
+	}
+	if meta.PostMarketPrice > 0 && (state == "POST" || state == "POSTPOST" || state == "CLOSED") {
+		change := firstNonZero(meta.PostMarketChange, meta.PostMarketPrice-meta.RegularMarketPrice)
+		changePercent := firstNonZero(meta.PostMarketChangePercent, percentChange(meta.PostMarketPrice, meta.RegularMarketPrice))
+		return &ChartExtendedMarket{
+			Session:       "post",
+			MarketState:   state,
+			Price:         meta.PostMarketPrice,
+			Change:        change,
+			ChangePercent: changePercent,
+			Time:          meta.PostMarketTime,
+		}
+	}
+	return nil
+}
+
+func chartExtendedMarketFromIntraday(meta yahooChartMeta, timestamps []int64, closes []*float64) *ChartExtendedMarket {
+	return chartExtendedMarketFromIntradayAt(meta, timestamps, closes, time.Now().Unix())
+}
+
+func chartExtendedMarketFromIntradayAt(meta yahooChartMeta, timestamps []int64, closes []*float64, now int64) *ChartExtendedMarket {
+	if meta.RegularMarketPrice <= 0 || len(timestamps) == 0 || len(closes) == 0 {
+		return chartExtendedMarketFromMeta(meta)
+	}
+	if yahooTradingPeriodContains(meta.CurrentTradingPeriod.Pre, now) {
+		if pre := chartExtendedMarketFromPeriod("pre", meta, meta.CurrentTradingPeriod.Pre, timestamps, closes); pre != nil {
+			return pre
+		}
+		return chartExtendedMarketFromMeta(meta)
+	}
+	if yahooTradingPeriodContains(meta.CurrentTradingPeriod.Post, now) {
+		if post := chartExtendedMarketFromPeriod("post", meta, meta.CurrentTradingPeriod.Post, timestamps, closes); post != nil {
+			return post
+		}
+		return chartExtendedMarketFromMeta(meta)
+	}
+	if yahooTradingPeriodContains(meta.CurrentTradingPeriod.Regular, now) {
+		return nil
+	}
+	if meta.CurrentTradingPeriod.Pre.Start != 0 || meta.CurrentTradingPeriod.Regular.Start != 0 || meta.CurrentTradingPeriod.Post.Start != 0 {
+		return nil
+	}
+	post := chartExtendedMarketFromPeriod("post", meta, latestYahooTradingPeriod(meta.TradingPeriods.Post), timestamps, closes)
+	pre := chartExtendedMarketFromPeriod("pre", meta, latestYahooTradingPeriod(meta.TradingPeriods.Pre), timestamps, closes)
+	if pre != nil && (post == nil || pre.Time > post.Time) {
+		return pre
+	}
+	if post != nil {
+		return post
+	}
+	return chartExtendedMarketFromMeta(meta)
+}
+
+func yahooTradingPeriodContains(period yahooTradingPeriod, ts int64) bool {
+	return period.Start > 0 && period.End > 0 && ts >= period.Start && ts <= period.End
+}
+
+func chartExtendedMarketFromPeriod(session string, meta yahooChartMeta, period yahooTradingPeriod, timestamps []int64, closes []*float64) *ChartExtendedMarket {
+	if period.Start == 0 || period.End == 0 {
+		return nil
+	}
+	var lastTime int64
+	var lastPrice float64
+	for i, ts := range timestamps {
+		if i >= len(closes) || closes[i] == nil {
+			continue
+		}
+		if ts < period.Start || ts > period.End {
+			continue
+		}
+		price := *closes[i]
+		if price <= 0 {
+			continue
+		}
+		if ts >= lastTime {
+			lastTime = ts
+			lastPrice = price
+		}
+	}
+	if lastTime == 0 || lastPrice <= 0 {
+		return nil
+	}
+	change := lastPrice - meta.RegularMarketPrice
+	return &ChartExtendedMarket{
+		Session:       session,
+		MarketState:   strings.ToUpper(strings.TrimSpace(meta.MarketState)),
+		Price:         lastPrice,
+		Change:        change,
+		ChangePercent: percentChange(lastPrice, meta.RegularMarketPrice),
+		Time:          lastTime,
+	}
+}
+
+func latestYahooTradingPeriod(periods [][]yahooTradingPeriod) yahooTradingPeriod {
+	var latest yahooTradingPeriod
+	for _, day := range periods {
+		for _, period := range day {
+			if period.End >= latest.End {
+				latest = period
+			}
+		}
+	}
+	return latest
+}
+
+func yahooChartReferenceClose(meta yahooChartMeta) float64 {
+	return firstNonZero(meta.PreviousClose, meta.RegularMarketPreviousClose, meta.ChartPreviousClose)
+}
+
+func firstNonZero(values ...float64) float64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func percentChange(value, ref float64) float64 {
+	if value == 0 || ref == 0 {
+		return 0
+	}
+	return (value - ref) / ref * 100
 }
 
 func chartCacheDir() string {
@@ -814,12 +993,15 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	ttl := chartCacheTTL(rng, interval)
 	fetchRange := chartFetchRange(rng, interval)
 	cachePath := chartCachePath(symbol, fetchRange, interval)
-	if cached, ok := loadChartCache(cachePath, ttl); ok && !cached.Stale {
-		applyCurrentDailyCandle(r.Context(), &cached)
-		cached = trimChartResponse(cached, rng, interval, maMode)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cached)
-		return
+	refresh := parseBoolQuery(r.URL.Query().Get("refresh"))
+	if !refresh {
+		if cached, ok := loadChartCache(cachePath, ttl); ok && !cached.Stale {
+			applyCurrentDailyCandle(r.Context(), &cached)
+			cached = trimChartResponse(cached, rng, interval, maMode)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
 	}
 
 	cr, err := fetchYahooChart(r.Context(), symbol, fetchRange, interval)
@@ -844,6 +1026,15 @@ func (s *Server) getChart(w http.ResponseWriter, r *http.Request) {
 	cr = trimChartResponse(cr, rng, interval, maMode)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(cr)
+}
+
+func parseBoolQuery(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func trimChartResponse(cr ChartResponse, displayRange, interval, maMode string) ChartResponse {
@@ -923,11 +1114,8 @@ func fetchYahooChart(ctx context.Context, symbol, rng, interval string) (ChartRe
 	type chartResp struct {
 		Chart struct {
 			Result []struct {
-				Meta struct {
-					Symbol   string `json:"symbol"`
-					Currency string `json:"currency"`
-				} `json:"meta"`
-				Timestamp  []int64 `json:"timestamp"`
+				Meta       yahooChartMeta `json:"meta"`
+				Timestamp  []int64        `json:"timestamp"`
 				Indicators struct {
 					Quote []struct {
 						Open   []*float64 `json:"open"`
@@ -997,7 +1185,12 @@ func fetchYahooChart(ctx context.Context, symbol, rng, interval string) (ChartRe
 	if len(candles) == 0 {
 		return ChartResponse{}, fmt.Errorf("no candles")
 	}
-	cr := ChartResponse{Symbol: res.Meta.Symbol, Currency: res.Meta.Currency, Candles: candles}
+	cr := ChartResponse{
+		Symbol:         res.Meta.Symbol,
+		Currency:       res.Meta.Currency,
+		ExtendedMarket: chartExtendedMarketFromMeta(res.Meta),
+		Candles:        candles,
+	}
 	enrichChartIndicators(&cr)
 	return cr, nil
 }
@@ -1006,10 +1199,12 @@ func applyCurrentDailyCandle(ctx context.Context, cr *ChartResponse) {
 	if cr == nil || cr.Interval != "1d" || cr.Symbol == "" {
 		return
 	}
-	candle, ok := fetchYahooCurrentDailyCandle(ctx, cr.Symbol)
-	if !ok || candle.Close <= 0 {
+	snapshot, ok := fetchYahooCurrentDailySnapshot(ctx, cr.Symbol)
+	if !ok || snapshot.Candle.Close <= 0 {
 		return
 	}
+	candle := snapshot.Candle
+	cr.ExtendedMarket = snapshot.ExtendedMarket
 	if len(cr.Candles) == 0 {
 		cr.Candles = []ChartCandle{candle}
 		recomputeChartIndicators(cr)
@@ -1033,15 +1228,17 @@ func applyCurrentDailyCandle(ctx context.Context, cr *ChartResponse) {
 	}
 }
 
-func fetchYahooCurrentDailyCandle(ctx context.Context, symbol string) (ChartCandle, bool) {
-	type chartMeta struct {
-		RegularMarketPrice float64 `json:"regularMarketPrice"`
-	}
+type yahooCurrentDailySnapshot struct {
+	Candle         ChartCandle
+	ExtendedMarket *ChartExtendedMarket
+}
+
+func fetchYahooCurrentDailySnapshot(ctx context.Context, symbol string) (yahooCurrentDailySnapshot, bool) {
 	type chartResp struct {
 		Chart struct {
 			Result []struct {
-				Meta       chartMeta `json:"meta"`
-				Timestamp  []int64   `json:"timestamp"`
+				Meta       yahooChartMeta `json:"meta"`
+				Timestamp  []int64        `json:"timestamp"`
 				Indicators struct {
 					Quote []struct {
 						Open   []*float64 `json:"open"`
@@ -1054,32 +1251,32 @@ func fetchYahooCurrentDailyCandle(ctx context.Context, symbol string) (ChartCand
 			} `json:"result"`
 		} `json:"chart"`
 	}
-	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(symbol) + "?range=1d&interval=5m"
+	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(symbol) + "?range=2d&interval=5m&includePrePost=true"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
 	var yr chartResp
 	if err := json.NewDecoder(resp.Body).Decode(&yr); err != nil {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
 	if len(yr.Chart.Result) == 0 || len(yr.Chart.Result[0].Indicators.Quote) == 0 {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
 	res := yr.Chart.Result[0]
 	q := res.Indicators.Quote[0]
 	if len(res.Timestamp) == 0 {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
 	var candle ChartCandle
 	for i, ts := range res.Timestamp {
@@ -1116,9 +1313,12 @@ func fetchYahooCurrentDailyCandle(ctx context.Context, symbol string) (ChartCand
 		}
 	}
 	if candle.Time == 0 || candle.Open == 0 || candle.High == 0 || candle.Low == 0 || candle.Close == 0 {
-		return ChartCandle{}, false
+		return yahooCurrentDailySnapshot{}, false
 	}
-	return candle, true
+	return yahooCurrentDailySnapshot{
+		Candle:         candle,
+		ExtendedMarket: chartExtendedMarketFromIntraday(res.Meta, res.Timestamp, q.Close),
+	}, true
 }
 
 func recomputeChartIndicators(cr *ChartResponse) {
@@ -1396,7 +1596,29 @@ func calcChartPivots(candles []ChartCandle, rsi []ChartLinePoint) []ChartPivot {
 			pivots = append(pivots, ChartPivot{Time: candles[i].Time, Kind: "low", Price: lo, RSI: rsiByTime[candles[i].Time]})
 		}
 	}
+	pivots = appendRecentEdgeRSIPivots(pivots, candles, "high", rsiByTime)
+	pivots = appendRecentEdgeRSIPivots(pivots, candles, "low", rsiByTime)
 	sort.SliceStable(pivots, func(i, j int) bool { return pivots[i].Time < pivots[j].Time })
+	return pivots
+}
+
+func appendRecentEdgeRSIPivots(pivots []ChartPivot, candles []ChartCandle, pivotKind string, rsiByTime map[int64]float64) []ChartPivot {
+	edge := appendRecentEdgePivots(nil, candles, pivotKind, 0)
+	if len(edge) == 0 {
+		return pivots
+	}
+	existing := make(map[string]bool, len(pivots))
+	for _, p := range pivots {
+		existing[fmt.Sprintf("%s:%d", p.Kind, p.Time)] = true
+	}
+	for _, p := range edge {
+		key := fmt.Sprintf("%s:%d", p.Kind, p.Time)
+		if existing[key] {
+			continue
+		}
+		p.RSI = rsiByTime[p.Time]
+		pivots = append(pivots, p)
+	}
 	return pivots
 }
 
@@ -1602,14 +1824,14 @@ func appendRecentEdgePivots(candidates []ChartPivot, candles []ChartCandle, pivo
 		existing[p.Time] = true
 	}
 	start := maxInt(4, len(candles)-24)
-	for i := start; i < len(candles)-1; i++ {
+	for i := start; i < len(candles); i++ {
 		c := candles[i]
 		if c.Time < firstTime || existing[c.Time] {
 			continue
 		}
 		left := 4
 		right := minInt(2, len(candles)-1-i)
-		if right < 1 {
+		if right < 1 && i != len(candles)-1 {
 			continue
 		}
 		isPivot := true
@@ -3591,8 +3813,7 @@ func isDivergenceStillActionable(div ChartDivergence, setups []ChartSetup, lastC
 			return false
 		}
 		for _, s := range setups {
-			if s.Kind == "ma_support_bounce" ||
-				s.Kind == "channel_breakout" ||
+			if s.Kind == "channel_breakout" ||
 				s.Kind == "breakout_retest" ||
 				s.Kind == "all_ma_reclaim" ||
 				s.Kind == "ma50_reclaim_confirmation" ||

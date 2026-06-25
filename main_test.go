@@ -254,3 +254,209 @@ func TestCalcChartPivotStructuresDetectsRecentVOOLowerHighAndLowerLow(t *testing
 		t.Fatalf("expected recent VOO lower high ending at 695.75, got %+v", lowerHighs)
 	}
 }
+
+func TestCalcChartPivotStructuresDetectsLatestEdgeLowerLow(t *testing.T) {
+	candles := make([]ChartCandle, 0, 64)
+	start := time.Date(2026, time.April, 1, 21, 0, 0, 0, time.UTC)
+	for i := 0; i < 64; i++ {
+		close := 20.0
+		high := close + 0.4
+		low := close - 0.4
+		switch i {
+		case 44:
+			close, high, low = 25.25, 25.95, 24.38
+		case 53:
+			close, high, low = 20.06, 20.08, 19.14
+		case 57:
+			close, high, low = 20.21, 20.30, 19.37
+		case 60:
+			close, high, low = 19.77, 20.71, 19.68
+		case 61:
+			close, high, low = 19.73, 20.19, 19.25
+		case 62:
+			close, high, low = 18.50, 19.64, 18.50
+		case 63:
+			close, high, low = 18.90, 18.96, 17.82
+		}
+		candles = append(candles, ChartCandle{
+			Time:   start.AddDate(0, 0, i).Unix(),
+			Open:   close - 0.1,
+			High:   high,
+			Low:    low,
+			Close:  close,
+			Volume: 1_000_000,
+		})
+	}
+	pivots := []ChartPivot{
+		{Time: candles[44].Time, Kind: "high", Price: 25.95},
+		{Time: candles[53].Time, Kind: "low", Price: 19.14},
+	}
+
+	lowerLows := calcChartPivotStructures(candles, pivots, "lower_low")
+	if len(lowerLows) != 2 || math.Abs(lowerLows[1].Price-17.82) > 0.001 {
+		t.Fatalf("expected latest edge lower low ending at 17.82, got %+v", lowerLows)
+	}
+
+	lowerHighs := calcChartPivotStructures(candles, pivots, "lower_high")
+	if len(lowerHighs) != 2 || math.Abs(lowerHighs[1].Price-20.71) > 0.001 {
+		t.Fatalf("expected recent lower high ending at 20.71, got %+v", lowerHighs)
+	}
+}
+
+func TestChartExtendedMarketFromMeta(t *testing.T) {
+	pre := chartExtendedMarketFromMeta(yahooChartMeta{
+		MarketState:            "PRE",
+		PreMarketPrice:         101.5,
+		PreMarketChangePercent: 1.5,
+		PostMarketPrice:        99.5,
+	})
+	if pre == nil || pre.Session != "pre" || pre.Price != 101.5 || pre.ChangePercent != 1.5 {
+		t.Fatalf("expected pre-market quote, got %+v", pre)
+	}
+
+	post := chartExtendedMarketFromMeta(yahooChartMeta{
+		MarketState:             "CLOSED",
+		PostMarketPrice:         98.25,
+		PostMarketChangePercent: -1.75,
+	})
+	if post == nil || post.Session != "post" || post.Price != 98.25 || post.ChangePercent != -1.75 {
+		t.Fatalf("expected post-market quote, got %+v", post)
+	}
+
+	regular := chartExtendedMarketFromMeta(yahooChartMeta{
+		MarketState:     "REGULAR",
+		PostMarketPrice: 98.25,
+	})
+	if regular != nil {
+		t.Fatalf("expected no extended quote during regular market, got %+v", regular)
+	}
+}
+
+func TestChartExtendedMarketFromIntradayPostSession(t *testing.T) {
+	priceA := 1058.0
+	priceB := 1064.9987
+	meta := yahooChartMeta{RegularMarketPrice: 1051.77}
+	meta.TradingPeriods.Post = [][]yahooTradingPeriod{{
+		{Start: 1782244800, End: 1782259200},
+	}}
+
+	extended := chartExtendedMarketFromIntraday(
+		meta,
+		[]int64{1782244500, 1782245100, 1782259199},
+		[]*float64{ptrFloat64(1051.77), &priceA, &priceB},
+	)
+	if extended == nil {
+		t.Fatal("expected derived post-market quote")
+	}
+	if extended.Session != "post" || extended.Price != priceB || extended.Time != 1782259199 {
+		t.Fatalf("unexpected post-market quote: %+v", extended)
+	}
+	if math.Abs(extended.ChangePercent-percentChange(priceB, meta.RegularMarketPrice)) > 0.0001 {
+		t.Fatalf("unexpected post-market change percent: %+v", extended)
+	}
+}
+
+func TestChartExtendedMarketFromIntradayPrefersLatestPreSession(t *testing.T) {
+	postPrice := 1064.9987
+	prePrice := 1087.31
+	meta := yahooChartMeta{RegularMarketPrice: 1051.77}
+	meta.TradingPeriods.Post = [][]yahooTradingPeriod{{
+		{Start: 1782244800, End: 1782259200},
+	}}
+	meta.TradingPeriods.Pre = [][]yahooTradingPeriod{{
+		{Start: 1782288000, End: 1782307800},
+	}}
+
+	extended := chartExtendedMarketFromIntraday(
+		meta,
+		[]int64{1782259199, 1782291600},
+		[]*float64{&postPrice, &prePrice},
+	)
+	if extended == nil {
+		t.Fatal("expected derived pre-market quote")
+	}
+	if extended.Session != "pre" || extended.Price != prePrice || extended.Time != 1782291600 {
+		t.Fatalf("expected latest pre-market quote, got %+v", extended)
+	}
+}
+
+func TestChartExtendedMarketFromIntradaySuppressesPreDuringRegularSession(t *testing.T) {
+	prePrice := 8.6
+	meta := yahooChartMeta{RegularMarketPrice: 8.28}
+	meta.CurrentTradingPeriod.Pre = yahooTradingPeriod{Start: 1000, End: 2000}
+	meta.CurrentTradingPeriod.Regular = yahooTradingPeriod{Start: 2000, End: 6000}
+	meta.TradingPeriods.Pre = [][]yahooTradingPeriod{{meta.CurrentTradingPeriod.Pre}}
+
+	extended := chartExtendedMarketFromIntradayAt(
+		meta,
+		[]int64{1500},
+		[]*float64{&prePrice},
+		3000,
+	)
+	if extended != nil {
+		t.Fatalf("expected no pre-market badge during regular session, got %+v", extended)
+	}
+}
+
+func TestYahooChartReferenceClosePrefersPreviousClose(t *testing.T) {
+	ref := yahooChartReferenceClose(yahooChartMeta{
+		PreviousClose:      1211.38,
+		ChartPreviousClose: 1133.99,
+	})
+	if ref != 1211.38 {
+		t.Fatalf("expected previousClose to win over chartPreviousClose, got %f", ref)
+	}
+}
+
+func TestBearishDivergenceStillActionableWithMASupportBounce(t *testing.T) {
+	div := ChartDivergence{Kind: "bearish", ToPrice: 1089.29}
+	setups := []ChartSetup{{Kind: "ma_support_bounce"}}
+	if !isDivergenceStillActionable(div, setups, 1051.77) {
+		t.Fatal("expected bearish divergence warning to remain visible with MA support bounce")
+	}
+}
+
+func TestCalcRSIDivergencesUsesRecentEdgeHigh(t *testing.T) {
+	start := time.Date(2026, time.June, 1, 13, 30, 0, 0, time.UTC)
+	candles := make([]ChartCandle, 0, 18)
+	rsi := make([]ChartLinePoint, 0, 18)
+	for i := 0; i < 18; i++ {
+		high := 900.0 + float64(i)
+		low := high - 60
+		close := high - 20
+		rsiValue := 60.0
+		switch i {
+		case 3:
+			high, low, close, rsiValue = 1089.29, 1010, 1065, 82.36
+		case 4:
+			high, low, close, rsiValue = 960, 890, 910, 55
+		case 5:
+			high, low, close, rsiValue = 940, 870, 900, 54
+		case 6:
+			high, low, close, rsiValue = 930, 860, 895, 53
+		case 13:
+			high, low, close, rsiValue = 1149.43, 1090, 1133, 66.39
+		case 14:
+			high, low, close, rsiValue = 1213.56, 1168, 1211, 69.76
+		case 15:
+			high, low, close, rsiValue = 1211.38, 1038, 1051, 57.04
+		}
+		ts := start.AddDate(0, 0, i).Unix()
+		candles = append(candles, ChartCandle{Time: ts, Open: close - 5, High: high, Low: low, Close: close, Volume: 1_000_000})
+		rsi = append(rsi, ChartLinePoint{Time: ts, Value: rsiValue})
+	}
+
+	pivots := calcChartPivots(candles, rsi)
+	divs := calcRSIDivergences(candles, pivots)
+	if len(divs) == 0 {
+		t.Fatalf("expected bearish divergence from confirmed high to recent edge high, pivots=%+v", pivots)
+	}
+	last := divs[len(divs)-1]
+	if last.Kind != "bearish" || math.Abs(last.ToPrice-1213.56) > 0.001 || math.Abs(last.ToRSI-69.76) > 0.001 {
+		t.Fatalf("unexpected latest divergence: %+v", last)
+	}
+}
+
+func ptrFloat64(v float64) *float64 {
+	return &v
+}
