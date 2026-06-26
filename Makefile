@@ -21,7 +21,7 @@ else
 endif
 
 build:
-	go build -o $(BINARY) .
+	go build -o $(BINARY) ./cmd/stock-portfolio
 
 clean:
 	rm -f $(BINARY)

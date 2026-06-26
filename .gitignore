@@ -4,6 +4,7 @@ stock-portfolio
 .env.prod
 files/
 stock-portfolio-linux
+.claude/
 # Terraform state
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup

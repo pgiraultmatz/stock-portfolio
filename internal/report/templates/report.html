@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f6f8fa;color:#24292f;line-height:1.6;padding:20px}
+.container{max-width:1100px;margin:0 auto;background:#fff;border:1px solid #d0d7de;border-radius:12px;overflow:hidden}
+.header{background:linear-gradient(135deg,#238636 0%,#1f6feb 100%);color:#fff;padding:40px 32px;text-align:center}
+.header h1{font-size:28px;font-weight:700;margin-bottom:8px}
+.header .date{font-size:15px}
+.header .stats{display:flex;justify-content:center;gap:16px;margin-top:16px;flex-wrap:wrap}
+.header .stat{background:rgba(255,255,255,0.15);padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500}
+.vix-banner{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid #d0d7de;background:#f6f8fa;font-size:14px}
+.vix-label{font-weight:700;font-size:13px;color:#57606a;text-transform:uppercase}
+.vix-price{font-size:18px;font-weight:700;color:#24292f}
+.vix-change{font-size:14px;font-weight:600}
+.vix-change.positive{color:#1a7f37}.vix-change.negative{color:#cf222e}.vix-change.neutral{color:#57606a}
+.vix-level{padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600;margin-left:auto}
+.vix-low{background:#dafbe1;color:#116329}.vix-moderate{background:#fff8c5;color:#7d4e00}.vix-extreme{background:#ffebe9;color:#82071e}
+.calendar-section{border-bottom:1px solid #d0d7de;background:#f6f8fa;padding:12px 24px}
+.calendar-title{font-size:11px;font-weight:700;color:#57606a;text-transform:uppercase;margin-bottom:6px}
+.calendar-list{list-style:disc;padding-left:18px;margin:0;font-size:13px;line-height:1.8}
+.calendar-stock-name{font-weight:600;color:#24292f}
+.calendar-stock-ticker{color:#656d76;font-size:11px;margin:0 4px}
+.calendar-days-label{font-size:11px;font-weight:600;color:#656d76}
+.urgent .calendar-days-label{color:#cf222e}.upcoming .calendar-days-label{color:#9a6700}
+.category{border-top:1px solid #d0d7de}
+.category-header{background:#f6f8fa;padding:14px 24px;border-bottom:1px solid #d0d7de}
+.category-title{font-size:15px;font-weight:600;color:#24292f}
+.category-narrative{font-size:12px;color:#57606a;margin-top:4px;line-height:1.4}
+.narr-score{display:inline-block;margin-left:8px;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle}
+.narr-score-high{background:#dafbe1;color:#116329}.narr-score-medium{background:#fff8c5;color:#7d4e00}
+.narr-score-low{background:#fff0e6;color:#bc4c00}.narr-score-negative{background:#ffebe9;color:#82071e}
+.stock-table{width:100%;border-collapse:collapse}
+th{padding:6px 14px;font-size:10px;font-weight:600;color:#8c959f;text-transform:uppercase;border-bottom:1px solid #eaecef;text-align:right}
+th.sh-name{text-align:left}th.sh-signal{text-align:center}
+td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
+.stock-name{font-weight:600;font-size:12px;color:#24292f}
+.stock-ticker{font-size:10px;color:#8c959f;margin-left:5px;font-family:monospace}
+.stock-price{text-align:right;font-family:monospace;font-weight:600;font-size:12px;color:#24292f}
+.stock-currency{font-size:9px;color:#8c959f;margin-left:3px}
+.stock-change{text-align:right;font-family:monospace;font-weight:600;font-size:12px;white-space:nowrap}
+.positive{color:#1a7f37}.negative{color:#cf222e}.neutral{color:#656d76}
+.stock-rsi{text-align:right;font-family:monospace;font-size:11px;color:#656d76}
+.rsi-strong-oversold{color:#cf222e;font-weight:700}.rsi-accumulation{color:#9a6700;font-weight:600}
+.rsi-neutral{color:#656d76}.rsi-momentum{color:#2da44e;font-weight:600}
+.rsi-extended{color:#9a6700;font-weight:600}.rsi-overbought{color:#bc4c00;font-weight:700}
+.rsi-very-overbought{color:#cf222e;font-weight:700}
+.stock-earnings{text-align:right;font-size:11px;font-family:monospace}
+.earnings-soon{color:#cf222e;font-weight:700}.earnings-upcoming{color:#9a6700;font-weight:600}.earnings-later{color:#8c959f}
+.stock-signal{text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.signal-strong-buy{color:#1a7f37}.signal-buy{color:#2da44e}.signal-accumulate{color:#6e9a7a}
+.signal-hold{color:#656d76}.signal-light-trim{color:#9a6700}.signal-trim{color:#bc4c00}
+.signal-sell{color:#cf222e}.signal-strong-sell{color:#82071e}
+.sig-note{color:#9a6700;font-size:9px;font-weight:700}
+.ai-section{border-top:2px solid #1f6feb}
+.ai-header{background:#1f6feb;color:#fff;padding:20px 24px;text-align:center}
+.ai-header h2{font-size:18px;font-weight:700}
+.ai-header .summary{font-size:13px;margin-top:6px}
+.ai-content{padding:20px 24px}
+.ai-card{border:1px solid #d0d7de;border-radius:6px;margin-bottom:16px;overflow:hidden}
+.ai-card-header{background:#f6f8fa;padding:10px 14px;border-bottom:1px solid #d0d7de;font-weight:600;font-size:13px}
+.ai-card-content{padding:14px}
+.top-stock{padding:10px 0;border-bottom:1px solid #eaecef}
+.top-stock-name{font-weight:600;font-size:13px}
+.top-stock-ticker{color:#656d76;font-size:11px;margin-left:5px}
+.top-stock-reasoning{font-size:12px;color:#656d76;margin-top:4px}
+.news-item{padding:10px 0;border-bottom:1px solid #eaecef}
+.news-headline{font-weight:600;font-size:13px}
+.news-description{font-size:12px;color:#656d76;margin-top:4px}
+.recommendation{padding:10px 0;border-bottom:1px solid #eaecef}
+.action-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;text-transform:uppercase}
+.action-badge.positive{background:#1a7f37;color:#fff}.action-badge.negative{background:#cf222e;color:#fff}
+.action-badge.neutral{background:#656d76;color:#fff}.action-badge.watch{background:#bf8700;color:#fff}
+.footer{background:#f6f8fa;border-top:1px solid #d0d7de;padding:16px;text-align:center;font-size:12px;color:#656d76}
+</style>
+</head>
+<body>
+<div class="container">
+        <div class="header">
+            <h1>📊 {{.Title}}</h1>
+            <p class="date">{{.GeneratedAt}}</p>
+            <div class="stats">
+                <span class="stat">{{.TotalStocks}} stocks tracked</span>
+                {{if gt .OversoldCount 0}}
+                <span class="stat">🔴 {{.OversoldCount}} oversold</span>
+                {{end}}
+                {{if gt .OverboughtCount 0}}
+                <span class="stat">🟢 {{.OverboughtCount}} overbought</span>
+                {{end}}
+            </div>
+        </div>
+
+        {{if .VIX}}
+        <div class="vix-banner">
+            <span class="vix-label">VIX</span>
+            <span class="vix-price">{{.VIX.Price}}</span>
+            <span class="vix-change {{.VIX.ChangeClass}}">{{.VIX.Change}}</span>
+            <span class="vix-level {{.VIX.LevelClass}}">{{.VIX.Level}} volatility</span>
+        </div>
+        {{end}}
+
+        {{if or .EarningsCalendar .EconomicEvents}}
+        <div class="calendar-section">
+            <div style="display:flex;gap:40px;flex-wrap:wrap;">
+                {{if .EarningsCalendar}}
+                <div>
+                    <div class="calendar-title">📅 Prochains résultats</div>
+                    <ul class="calendar-list">
+                        {{range .EarningsCalendar}}
+                        <li class="{{.Urgency}}">
+                            <span class="calendar-stock-name">{{.Name}}</span>
+                            <span class="calendar-stock-ticker">{{.Ticker}}</span>
+                            <span class="calendar-days-label">— {{.DaysLabel}}</span>
+                        </li>
+                        {{end}}
+                    </ul>
+                </div>
+                {{end}}
+                {{if .EconomicEvents}}
+                <div>
+                    <div class="calendar-title">🏛️ Événements macro cette semaine</div>
+                    <ul class="calendar-list">
+                        {{range .EconomicEvents}}
+                        <li>
+                            <span class="calendar-stock-name">{{.Name}}</span>
+                            <span class="calendar-days-label">— {{.Date}}</span>
+                        </li>
+                        {{end}}
+                    </ul>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+
+        {{range .CategoryGroups}}
+        <div class="category">
+            <div class="category-header">
+                <div class="category-title">
+                    <span class="category-emoji">{{.Emoji}}</span>
+                    <span>{{.Name}}</span>
+                    {{if .NarrativeScore}}<span class="narr-score {{.NarrScoreClass}}">{{.NarrativeScore}}/10</span>{{end}}
+                </div>
+                {{if .Narrative}}<div class="category-narrative">{{.Narrative}}</div>{{end}}
+            </div>
+            <table class="stock-table">
+                <thead>
+                    <tr class="stock-header">
+                        <th class="sh-name">Name</th>
+                        <th class="sh-price">Price</th>
+                        <th class="sh-change">Change</th>
+                        <th class="sh-rsi">RSI</th>
+                        <th class="sh-earnings">Earnings</th>
+                        <th class="sh-signal">Signal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Stocks}}
+                    <tr class="stock-row">
+                        <td class="stock-name">{{.Name}} <span class="stock-ticker">{{.Ticker}}</span></td>
+                        <td class="stock-price">{{.Price}}{{if .Currency}} <span class="stock-currency">{{.Currency}}</span>{{end}}</td>
+                        <td class="stock-change {{.ChangeClass}}"><span class="change-icon">{{.ChangeIcon}}</span>{{.Change}}</td>
+                        <td class="stock-rsi {{.RSIClass}}">{{.RSI}}</td>
+                        <td class="stock-earnings {{.EarningsClass}}">{{.Earnings}}</td>
+                        <td class="stock-signal {{.SignalClass}}">{{if .Signal}}{{.Signal}}{{if .SignalNote}}<br><span class="sig-note">/ {{.SignalNote}}</span>{{end}}{{end}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{end}}
+
+        {{if .AIAnalysis}}
+        <div class="ai-section">
+            <div class="ai-header">
+                <h2>AI Market Analysis</h2>
+                {{if .AIAnalysis.MarketSummary}}
+                <p class="summary">{{.AIAnalysis.MarketSummary}}</p>
+                {{end}}
+            </div>
+            <div class="ai-content">
+                <div class="ai-grid">
+                    {{if .AIAnalysis.TopStocks}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <span>Top 3 Stocks to Watch</span>
+                        </div>
+                        <div class="ai-card-content">
+                            {{range .AIAnalysis.TopStocks}}
+                            <div class="top-stock">
+                                <div class="top-stock-header">
+                                    <span>
+                                        <span class="top-stock-name">{{.Name}}</span>
+                                        <span class="top-stock-ticker">{{.Ticker}}</span>
+                                    </span>
+                                    <span class="signal-badge {{.SignalClass}}">{{.SignalIcon}} {{.Signal}}</span>
+                                </div>
+                                <p class="top-stock-reasoning">{{.Reasoning}}</p>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+
+                    {{if .AIAnalysis.NewsContext}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <span>Recent News Context</span>
+                        </div>
+                        <div class="ai-card-content">
+                            {{range .AIAnalysis.NewsContext}}
+                            <div class="news-item">
+                                <div>
+                                    <span class="news-impact {{.ImpactClass}}">{{.Impact}}</span>
+                                    <span class="news-headline">{{.Headline}}</span>
+                                </div>
+                                {{if .AffectedBy}}
+                                <div class="news-affected">Affects: {{.AffectedBy}}</div>
+                                {{end}}
+                                <p class="news-description">{{.Description}}</p>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+
+                    {{if .AIAnalysis.Recommendations}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <span>Actionable Recommendations</span>
+                        </div>
+                        <div class="ai-card-content">
+                            {{range .AIAnalysis.Recommendations}}
+                            <div class="recommendation">
+                                <span class="action-badge {{.ActionClass}}">{{.Action}}</span>
+                                <div class="recommendation-details">
+                                    <div>
+                                        <span class="recommendation-name">{{.Name}}</span>
+                                        <span class="recommendation-ticker">{{.Ticker}}</span>
+                                    </div>
+                                    <p class="recommendation-reason">{{.Reason}}</p>
+                                </div>
+                                <span class="risk-badge {{.RiskClass}}">Risk: {{.Risk}}</span>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+        {{end}}
+
+
+        <div class="footer">
+            <p>Generated automatically by Stock Checker</p>
+        </div>
+    </div>
+</html>

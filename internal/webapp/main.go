@@ -1,4 +1,4 @@
-package main
+package webapp
 
 import (
 	"context"
@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"stock-portfolio/internal/chartcalc"
 
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
@@ -565,14 +567,7 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(results)
 }
 
-type ChartCandle struct {
-	Time   int64   `json:"time"`
-	Open   float64 `json:"open"`
-	High   float64 `json:"high"`
-	Low    float64 `json:"low"`
-	Close  float64 `json:"close"`
-	Volume int64   `json:"volume"`
-}
+type ChartCandle = chartcalc.Candle
 
 type yahooChartMeta struct {
 	Symbol                     string  `json:"symbol"`
@@ -607,10 +602,7 @@ type yahooTradingPeriod struct {
 	End   int64 `json:"end"`
 }
 
-type ChartLinePoint struct {
-	Time  int64   `json:"time"`
-	Value float64 `json:"value"`
-}
+type ChartLinePoint = chartcalc.LinePoint
 
 type ChartMACDPoint struct {
 	Time      int64   `json:"time"`
@@ -619,19 +611,9 @@ type ChartMACDPoint struct {
 	Histogram float64 `json:"histogram"`
 }
 
-type ChartPivot struct {
-	Time  int64   `json:"time"`
-	Kind  string  `json:"kind"`
-	Price float64 `json:"price"`
-	RSI   float64 `json:"rsi,omitempty"`
-}
+type ChartPivot = chartcalc.Pivot
 
-type ChartLevel struct {
-	Kind     string  `json:"kind"`
-	Price    float64 `json:"price"`
-	Strength int     `json:"strength"`
-	Touches  []int64 `json:"touches"`
-}
+type ChartLevel = chartcalc.Level
 
 type ChartPivotStructure struct {
 	Kind    string  `json:"kind"`
@@ -641,15 +623,7 @@ type ChartPivotStructure struct {
 	Index   int     `json:"index"`
 }
 
-type ChartDivergence struct {
-	Kind      string  `json:"kind"`
-	FromTime  int64   `json:"fromTime"`
-	ToTime    int64   `json:"toTime"`
-	FromPrice float64 `json:"fromPrice"`
-	ToPrice   float64 `json:"toPrice"`
-	FromRSI   float64 `json:"fromRsi"`
-	ToRSI     float64 `json:"toRsi"`
-}
+type ChartDivergence = chartcalc.Divergence
 
 type ChartChannel struct {
 	Kind           string  `json:"kind"`
@@ -1411,37 +1385,7 @@ func enrichChartIndicators(cr *ChartResponse) {
 }
 
 func calcRSI14(candles []ChartCandle) []ChartLinePoint {
-	const period = 14
-	if len(candles) <= period {
-		return nil
-	}
-	gains := make([]float64, len(candles))
-	losses := make([]float64, len(candles))
-	for i := 1; i < len(candles); i++ {
-		diff := candles[i].Close - candles[i-1].Close
-		if diff >= 0 {
-			gains[i] = diff
-		} else {
-			losses[i] = -diff
-		}
-	}
-
-	var avgGain, avgLoss float64
-	for i := 1; i <= period; i++ {
-		avgGain += gains[i]
-		avgLoss += losses[i]
-	}
-	avgGain /= period
-	avgLoss /= period
-
-	points := make([]ChartLinePoint, 0, len(candles)-period)
-	points = append(points, ChartLinePoint{Time: candles[period].Time, Value: rsiValue(avgGain, avgLoss)})
-	for i := period + 1; i < len(candles); i++ {
-		avgGain = (avgGain*float64(period-1) + gains[i]) / period
-		avgLoss = (avgLoss*float64(period-1) + losses[i]) / period
-		points = append(points, ChartLinePoint{Time: candles[i].Time, Value: rsiValue(avgGain, avgLoss)})
-	}
-	return points
+	return chartcalc.CalcRSI14(candles)
 }
 
 func calcSMA(candles []ChartCandle, period int) []ChartLinePoint {
@@ -1563,63 +1507,11 @@ func activeMALabel(cr ChartResponse) string {
 }
 
 func calcChartPivots(candles []ChartCandle, rsi []ChartLinePoint) []ChartPivot {
-	const left = 3
-	const right = 3
-	if len(candles) < left+right+1 {
-		return nil
-	}
-	rsiByTime := make(map[int64]float64, len(rsi))
-	for _, p := range rsi {
-		rsiByTime[p.Time] = p.Value
-	}
-	var pivots []ChartPivot
-	for i := left; i < len(candles)-right; i++ {
-		hi := candles[i].High
-		lo := candles[i].Low
-		isHigh := true
-		isLow := true
-		for j := i - left; j <= i+right; j++ {
-			if j == i {
-				continue
-			}
-			if candles[j].High >= hi {
-				isHigh = false
-			}
-			if candles[j].Low <= lo {
-				isLow = false
-			}
-		}
-		if isHigh {
-			pivots = append(pivots, ChartPivot{Time: candles[i].Time, Kind: "high", Price: hi, RSI: rsiByTime[candles[i].Time]})
-		}
-		if isLow {
-			pivots = append(pivots, ChartPivot{Time: candles[i].Time, Kind: "low", Price: lo, RSI: rsiByTime[candles[i].Time]})
-		}
-	}
-	pivots = appendRecentEdgeRSIPivots(pivots, candles, "high", rsiByTime)
-	pivots = appendRecentEdgeRSIPivots(pivots, candles, "low", rsiByTime)
-	sort.SliceStable(pivots, func(i, j int) bool { return pivots[i].Time < pivots[j].Time })
-	return pivots
+	return chartcalc.CalcPivots(candles, rsi)
 }
 
 func appendRecentEdgeRSIPivots(pivots []ChartPivot, candles []ChartCandle, pivotKind string, rsiByTime map[int64]float64) []ChartPivot {
-	edge := appendRecentEdgePivots(nil, candles, pivotKind, 0)
-	if len(edge) == 0 {
-		return pivots
-	}
-	existing := make(map[string]bool, len(pivots))
-	for _, p := range pivots {
-		existing[fmt.Sprintf("%s:%d", p.Kind, p.Time)] = true
-	}
-	for _, p := range edge {
-		key := fmt.Sprintf("%s:%d", p.Kind, p.Time)
-		if existing[key] {
-			continue
-		}
-		p.RSI = rsiByTime[p.Time]
-		pivots = append(pivots, p)
-	}
-	return pivots
+	return chartcalc.AppendRecentEdgeRSIPivots(pivots, candles, pivotKind, rsiByTime)
 }
 
 func calcChartLevels(pivots []ChartPivot) []ChartLevel {
@@ -1816,53 +1708,7 @@ func chartPivotStructureRecentPairContinues(candidate, previous ChartPivot, dire
 }
 
 func appendRecentEdgePivots(candidates []ChartPivot, candles []ChartCandle, pivotKind string, firstTime int64) []ChartPivot {
-	if len(candles) < 8 {
-		return candidates
-	}
-	existing := make(map[int64]bool, len(candidates))
-	for _, p := range candidates {
-		existing[p.Time] = true
-	}
-	start := maxInt(4, len(candles)-24)
-	for i := start; i < len(candles); i++ {
-		c := candles[i]
-		if c.Time < firstTime || existing[c.Time] {
-			continue
-		}
-		left := 4
-		right := minInt(2, len(candles)-1-i)
-		if right < 1 && i != len(candles)-1 {
-			continue
-		}
-		isPivot := true
-		for j := i - left; j <= i+right; j++ {
-			if j == i {
-				continue
-			}
-			if pivotKind == "high" && candles[j].High >= c.High {
-				isPivot = false
-				break
-			}
-			if pivotKind == "low" && candles[j].Low <= c.Low {
-				isPivot = false
-				break
-			}
-		}
-		if !isPivot {
-			continue
-		}
-		price := c.High
-		if pivotKind == "low" {
-			price = c.Low
-		}
-		candidates = append(candidates, ChartPivot{
-			Time:  c.Time,
-			Kind:  pivotKind,
-			Price: price,
-		})
-	}
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Time < candidates[j].Time })
-	return candidates
+	return chartcalc.AppendRecentEdgePivots(candidates, candles, pivotKind, firstTime)
 }
 
 func chartPivotStructureSpec(kind string) (string, string, bool) {
@@ -2040,33 +1886,7 @@ func chartPivotStructureSetups(
 }
 
 func calcRSIDivergences(candles []ChartCandle, pivots []ChartPivot) []ChartDivergence {
-	var divs []ChartDivergence
-	lastLow := ChartPivot{}
-	lastHigh := ChartPivot{}
-	for _, p := range pivots {
-		if p.RSI == 0 {
-			continue
-		}
-		switch p.Kind {
-		case "low":
-			if lastLow.Time != 0 && p.Price < lastLow.Price && p.RSI > lastLow.RSI+2 && divergenceSameSwing(candles, lastLow, p, "bullish") {
-				divs = append(divs, ChartDivergence{
-					Kind: "bullish", FromTime: lastLow.Time, ToTime: p.Time,
-					FromPrice: lastLow.Price, ToPrice: p.Price, FromRSI: lastLow.RSI, ToRSI: p.RSI,
-				})
-			}
-			lastLow = p
-		case "high":
-			if lastHigh.Time != 0 && p.Price > lastHigh.Price && p.RSI < lastHigh.RSI-2 && divergenceSameSwing(candles, lastHigh, p, "bearish") {
-				divs = append(divs, ChartDivergence{
-					Kind: "bearish", FromTime: lastHigh.Time, ToTime: p.Time,
-					FromPrice: lastHigh.Price, ToPrice: p.Price, FromRSI: lastHigh.RSI, ToRSI: p.RSI,
-				})
-			}
-			lastHigh = p
-		}
-	}
-	return divs
+	return chartcalc.CalcRSIDivergences(candles, pivots)
 }
 
 func divergenceSameSwing(candles []ChartCandle, from, to ChartPivot, kind string) bool {
@@ -2104,17 +1924,7 @@ func divergenceSameSwing(candles []ChartCandle, from, to ChartPivot, kind string
 }
 
 func filterDivergencesByContext(divs []ChartDivergence, candles []ChartCandle, sma50, sma100, sma200 []ChartLinePoint, levels []ChartLevel) []ChartDivergence {
-	if len(divs) == 0 {
-		return nil
-	}
-	out := make([]ChartDivergence, 0, len(divs))
-	for _, div := range divs {
-		if div.Kind == "bullish" && divergenceOverlapsMASupportBounce(div, candles, sma50, sma100, sma200, levels) {
-			continue
-		}
-		out = append(out, div)
-	}
-	return out
+	return chartcalc.FilterDivergencesByContext(divs, candles, sma50, sma100, sma200, levels)
 }
 
 func divergenceOverlapsMASupportBounce(div ChartDivergence, candles []ChartCandle, sma50, sma100, sma200 []ChartLinePoint, levels []ChartLevel) bool {
@@ -5210,7 +5020,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/account/deleted", func(w http.ResponseWriter, r *http.Request) {
 		var data []byte
 		if os.Getenv("DEV") == "1" {
-			data, _ = os.ReadFile(filepath.Join("static", "deleted.html"))
+			data, _ = os.ReadFile(filepath.Join(staticDir(), "deleted.html"))
 		} else {
 			data, _ = staticFiles.ReadFile("static/deleted.html")
 		}
@@ -5227,7 +5037,7 @@ func (s *Server) routes() http.Handler {
 	var fileServer http.Handler
 	if devMode {
 		log.Println("DEV mode: serving static files from disk (no rebuild needed)")
-		fileServer = http.FileServer(http.Dir("static"))
+		fileServer = http.FileServer(http.Dir(staticDir()))
 	} else {
 		staticFS, _ := fs.Sub(staticFiles, "static")
 		fileServer = http.FileServer(http.FS(staticFS))
@@ -5238,7 +5048,7 @@ func (s *Server) routes() http.Handler {
 		if r.URL.Path != "/" {
 			exists := false
 			if devMode {
-				_, err := os.Stat(filepath.Join("static", r.URL.Path))
+				_, err := os.Stat(filepath.Join(staticDir(), filepath.Clean(r.URL.Path)))
 				exists = err == nil
 			} else {
 				f, err := staticFiles.Open("static" + r.URL.Path)
@@ -5254,7 +5064,7 @@ func (s *Server) routes() http.Handler {
 		}
 		var data []byte
 		if devMode {
-			data, _ = os.ReadFile(filepath.Join("static", "index.html"))
+			data, _ = os.ReadFile(filepath.Join(staticDir(), "index.html"))
 		} else {
 			data, _ = staticFiles.ReadFile("static/index.html")
 		}
@@ -5510,6 +5320,10 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+func staticDir() string {
+	return filepath.Join("internal", "webapp", "static")
+}
+
 // ---- misc ----
 
 func randomHex(n int) string {
@@ -5543,7 +5357,7 @@ func loadDotEnv(path string) {
 	}
 }
 
-func main() {
+func Run() {
 	addr := flag.String("addr", ":8080", "listen address")
 	flag.Parse()
 

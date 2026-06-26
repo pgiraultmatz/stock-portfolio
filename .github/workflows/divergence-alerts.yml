@@ -1,0 +1,71 @@
+name: RSI Divergence Alerts
+
+on:
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.25.x'
+
+jobs:
+  check-divergences:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set date
+        id: date
+        run: echo "TODAY=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore divergence state
+        uses: actions/cache/restore@v4
+        with:
+          path: .divergence-state.json
+          key: divergence-alerts-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
+          restore-keys: divergence-alerts-${{ steps.date.outputs.TODAY }}-
+
+      - name: Build application
+        run: go build -o stock-checker ./cmd/stock-checker
+
+      - name: Check RSI divergences
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: ./stock-checker -config config.json -check-divergences -divergences-output divergences.html -divergences-state .divergence-state.json -verbose
+
+      - name: Save divergence state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .divergence-state.json
+          key: divergence-alerts-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
+
+      - name: Send divergence email
+        if: hashFiles('divergences.html') != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "RSI Divergence Alert — ${{ steps.date.outputs.TODAY }}"
+          html_body: file://divergences.html
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>
+          secure: true
+
+      - name: Upload divergence artifact
+        if: hashFiles('divergences.html') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: divergence-alerts-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
+          path: divergences.html
+          retention-days: 7

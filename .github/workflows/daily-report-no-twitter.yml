@@ -1,0 +1,61 @@
+name: Daily Stock Report (no Twitter)
+
+on:
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.25.x'
+
+jobs:
+  stock-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build application
+        run: |
+          go build -o stock-checker ./cmd/stock-checker
+
+      - name: Set date
+        id: date
+        run: |
+          echo "TODAY=$(date +'%d/%m/%Y')" >> $GITHUB_OUTPUT
+          echo "TODAY_SAFE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Run stock analysis
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          ./stock-checker -config config.json -output report.html -no-twitter -verbose
+
+      - name: Send email report
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Stock Market Report - ${{ steps.date.outputs.TODAY }}"
+          html_body: file://report.html
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>
+          secure: true
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-report-${{ steps.date.outputs.TODAY_SAFE }}
+          path: report.html
+          retention-days: 30
