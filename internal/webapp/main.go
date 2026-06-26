@@ -732,7 +732,7 @@ type ChartResponse struct {
 
 func chartExtendedMarketFromMeta(meta yahooChartMeta) *ChartExtendedMarket {
 	state := strings.ToUpper(strings.TrimSpace(meta.MarketState))
-	if meta.PreMarketPrice > 0 && (state == "PRE" || meta.PostMarketPrice <= 0) {
+	if meta.PreMarketPrice > 0 && (isYahooPreMarketState(state) || meta.PostMarketPrice <= 0) {
 		change := firstNonZero(meta.PreMarketChange, meta.PreMarketPrice-meta.RegularMarketPrice)
 		changePercent := firstNonZero(meta.PreMarketChangePercent, percentChange(meta.PreMarketPrice, meta.RegularMarketPrice))
 		return &ChartExtendedMarket{
@@ -744,7 +744,7 @@ func chartExtendedMarketFromMeta(meta yahooChartMeta) *ChartExtendedMarket {
 			Time:          meta.PreMarketTime,
 		}
 	}
-	if meta.PostMarketPrice > 0 && (state == "POST" || state == "POSTPOST" || state == "CLOSED") {
+	if meta.PostMarketPrice > 0 && (isYahooPostMarketState(state) || state == "CLOSED") {
 		change := firstNonZero(meta.PostMarketChange, meta.PostMarketPrice-meta.RegularMarketPrice)
 		changePercent := firstNonZero(meta.PostMarketChangePercent, percentChange(meta.PostMarketPrice, meta.RegularMarketPrice))
 		return &ChartExtendedMarket{
@@ -767,6 +767,7 @@ func chartExtendedMarketFromIntradayAt(meta yahooChartMeta, timestamps []int64, 
 	if meta.RegularMarketPrice <= 0 || len(timestamps) == 0 || len(closes) == 0 {
 		return chartExtendedMarketFromMeta(meta)
 	}
+	state := strings.ToUpper(strings.TrimSpace(meta.MarketState))
 	if yahooTradingPeriodContains(meta.CurrentTradingPeriod.Pre, now) {
 		if pre := chartExtendedMarketFromPeriod("pre", meta, meta.CurrentTradingPeriod.Pre, timestamps, closes); pre != nil {
 			return pre
@@ -782,6 +783,9 @@ func chartExtendedMarketFromIntradayAt(meta yahooChartMeta, timestamps []int64, 
 	if yahooTradingPeriodContains(meta.CurrentTradingPeriod.Regular, now) {
 		return nil
 	}
+	if isYahooPreMarketState(state) || isYahooPostMarketState(state) {
+		return chartExtendedMarketFromMeta(meta)
+	}
 	if meta.CurrentTradingPeriod.Pre.Start != 0 || meta.CurrentTradingPeriod.Regular.Start != 0 || meta.CurrentTradingPeriod.Post.Start != 0 {
 		return nil
 	}
@@ -794,6 +798,14 @@ func chartExtendedMarketFromIntradayAt(meta yahooChartMeta, timestamps []int64, 
 		return post
 	}
 	return chartExtendedMarketFromMeta(meta)
+}
+
+func isYahooPreMarketState(state string) bool {
+	return state == "PRE" || state == "PREPRE"
+}
+
+func isYahooPostMarketState(state string) bool {
+	return state == "POST" || state == "POSTPOST"
 }
 
 func yahooTradingPeriodContains(period yahooTradingPeriod, ts int64) bool {

@@ -2535,6 +2535,12 @@ window.addEventListener('resize', () => {
 });
 
 // ---- quotes ----
+const QUOTES_CACHE_VERSION = '2';
+if (localStorage.getItem('quotesCacheVersion') !== QUOTES_CACHE_VERSION) {
+  localStorage.removeItem('quotesCache');
+  localStorage.removeItem('quotesLastFetched');
+  localStorage.setItem('quotesCacheVersion', QUOTES_CACHE_VERSION);
+}
 let quotes = JSON.parse(localStorage.getItem('quotesCache') || '{}');
 let quotesTimer = null;
 let quotesLastFetched = Number(localStorage.getItem('quotesLastFetched') || 0);
@@ -2572,6 +2578,7 @@ async function fetchQuotes(force = false) {
     if (!res.ok) return;
     quotes = await res.json();
     quotesLastFetched = Date.now();
+    localStorage.setItem('quotesCacheVersion', QUOTES_CACHE_VERSION);
     localStorage.setItem('quotesLastFetched', quotesLastFetched);
     localStorage.setItem('quotesCache', JSON.stringify(quotes));
     applyQuotes();

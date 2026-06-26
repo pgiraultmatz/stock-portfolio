@@ -398,6 +398,52 @@ func TestChartExtendedMarketFromIntradaySuppressesPreDuringRegularSession(t *tes
 	}
 }
 
+func TestChartExtendedMarketFromIntradaySuppressesStalePostBeforePremarket(t *testing.T) {
+	postPrice := 1064.99
+	meta := yahooChartMeta{
+		MarketState:        "CLOSED",
+		RegularMarketPrice: 1051.77,
+		PostMarketPrice:    postPrice,
+	}
+	meta.CurrentTradingPeriod.Pre = yahooTradingPeriod{Start: 10_000, End: 20_000}
+	meta.CurrentTradingPeriod.Regular = yahooTradingPeriod{Start: 20_000, End: 30_000}
+	meta.CurrentTradingPeriod.Post = yahooTradingPeriod{Start: 30_000, End: 40_000}
+	meta.TradingPeriods.Post = [][]yahooTradingPeriod{{{Start: 1_000, End: 2_000}}}
+
+	extended := chartExtendedMarketFromIntradayAt(
+		meta,
+		[]int64{1_500},
+		[]*float64{&postPrice},
+		9_000,
+	)
+	if extended != nil {
+		t.Fatalf("expected stale post-market badge to be hidden before pre-market, got %+v", extended)
+	}
+}
+
+func TestChartExtendedMarketFromIntradayTrustsExplicitPremarketState(t *testing.T) {
+	prePrice := 1087.31
+	meta := yahooChartMeta{
+		MarketState:            "PREPRE",
+		RegularMarketPrice:     1051.77,
+		PreMarketPrice:         prePrice,
+		PreMarketChangePercent: 3.38,
+	}
+	meta.CurrentTradingPeriod.Pre = yahooTradingPeriod{Start: 10_000, End: 20_000}
+	meta.CurrentTradingPeriod.Regular = yahooTradingPeriod{Start: 20_000, End: 30_000}
+	meta.CurrentTradingPeriod.Post = yahooTradingPeriod{Start: 30_000, End: 40_000}
+
+	extended := chartExtendedMarketFromIntradayAt(
+		meta,
+		[]int64{1_500},
+		[]*float64{ptrFloat64(1064.99)},
+		9_000,
+	)
+	if extended == nil || extended.Session != "pre" || extended.Price != prePrice {
+		t.Fatalf("expected explicit pre-market meta quote, got %+v", extended)
+	}
+}
+
 func TestYahooChartReferenceClosePrefersPreviousClose(t *testing.T) {
 	ref := yahooChartReferenceClose(yahooChartMeta{
 		PreviousClose:      1211.38,
