@@ -17,11 +17,11 @@ func TestCheckCandlesKeepsEMAProximityAndDetectsReclaim(t *testing.T) {
 
 	alerts := CheckCandles(testStock(), Daily, candles, 5)
 
-	if !hasKind(alerts, EMAProximity) {
-		t.Fatal("expected EMA proximity signal")
-	}
 	if !hasKind(alerts, EMAReclaim) {
 		t.Fatal("expected EMA reclaim signal")
+	}
+	if hasKindPeriod(alerts, EMAProximity, 50) {
+		t.Fatal("did not expect EMA50 proximity when EMA50 reclaim is present")
 	}
 }
 
@@ -96,6 +96,15 @@ func testStock() models.Stock {
 func hasKind(alerts []Alert, kind Kind) bool {
 	for _, alert := range alerts {
 		if alert.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasKindPeriod(alerts []Alert, kind Kind, period int) bool {
+	for _, alert := range alerts {
+		if alert.Kind == kind && alert.Period == period {
 			return true
 		}
 	}

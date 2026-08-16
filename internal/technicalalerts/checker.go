@@ -146,7 +146,19 @@ func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.C
 		distancePercent := ((last.Close - latest) / latest) * 100
 		touched := last.Low <= latest && last.High >= latest
 		near := math.Abs(distancePercent) <= emaThresholdPercent
-		if touched || near {
+
+		hasCross := false
+		if math.IsNaN(previous) {
+			hasCross = false
+		} else if prev.Close <= previous && last.Close > latest {
+			hasCross = true
+			alerts = append(alerts, emaCrossAlert(stock, timeframe, last, period, EMAReclaim, "bullish", latest, distancePercent, previous))
+		} else if prev.Close >= previous && last.Close < latest {
+			hasCross = true
+			alerts = append(alerts, emaCrossAlert(stock, timeframe, last, period, EMALoss, "bearish", latest, distancePercent, previous))
+		}
+
+		if !hasCross && (touched || near) {
 			status := "near"
 			if touched {
 				status = "touch"
@@ -158,32 +170,27 @@ func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.C
 				Detail: fmt.Sprintf("Close is %+.2f%% from EMA%d.", distancePercent, period),
 			})
 		}
-
-		if math.IsNaN(previous) {
-			continue
-		}
-		if prev.Close <= previous && last.Close > latest {
-			alerts = append(alerts, Alert{
-				Stock: stock, Timeframe: timeframe, Kind: EMAReclaim, Label: fmt.Sprintf("EMA%d reclaim", period),
-				Bias: "bullish", Period: period, CandleTime: last.Time, LastClose: last.Close, Level: latest,
-				DistancePercent: distancePercent, PreviousValue: previous, CurrentValue: latest,
-				Detail: fmt.Sprintf("Close reclaimed EMA%d after previously closing below it.", period),
-			})
-		}
-		if prev.Close >= previous && last.Close < latest {
-			alerts = append(alerts, Alert{
-				Stock: stock, Timeframe: timeframe, Kind: EMALoss, Label: fmt.Sprintf("EMA%d loss", period),
-				Bias: "bearish", Period: period, CandleTime: last.Time, LastClose: last.Close, Level: latest,
-				DistancePercent: distancePercent, PreviousValue: previous, CurrentValue: latest,
-				Detail: fmt.Sprintf("Close lost EMA%d after previously closing above it.", period),
-			})
-		}
 	}
 
 	alerts = append(alerts, rsiRegimeAlerts(stock, timeframe, candles)...)
 	alerts = append(alerts, breakoutAlerts(stock, timeframe, candles)...)
 	alerts = append(alerts, macdCrossAlerts(stock, timeframe, candles, emaLines[50])...)
 	return alerts
+}
+
+func emaCrossAlert(stock models.Stock, timeframe Timeframe, last chartcalc.Candle, period int, kind Kind, bias string, level float64, distancePercent float64, previousValue float64) Alert {
+	action := "reclaimed"
+	labelKind := "reclaim"
+	if kind == EMALoss {
+		action = "lost"
+		labelKind = "loss"
+	}
+	return Alert{
+		Stock: stock, Timeframe: timeframe, Kind: kind, Label: fmt.Sprintf("EMA%d %s", period, labelKind),
+		Bias: bias, Period: period, CandleTime: last.Time, LastClose: last.Close, Level: level,
+		DistancePercent: distancePercent, PreviousValue: previousValue, CurrentValue: level,
+		Detail: fmt.Sprintf("Close %s EMA%d after previously closing on the other side.", action, period),
+	}
 }
 
 func Key(alert Alert) string {

@@ -829,7 +829,7 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 	}
 
 	logger.Info("market signal digest triggered", "timeframe", timeframeValue, "divergences", len(divergences), "technical", len(technical), "ema_threshold", emaThreshold)
-	html := marketdigest.GenerateReport(divergences, technical, timeframeValue, emaThreshold)
+	html := marketdigest.GenerateReportWithCategoryOrder(divergences, technical, timeframeValue, emaThreshold, cfg.GetCategoryOrder())
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
 		return fmt.Errorf("writing market signal digest: %w", err)
 	}
