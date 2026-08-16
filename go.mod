@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.14
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.20.37
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.57.1
+	github.com/gorilla/websocket v1.5.3
 	golang.org/x/crypto v0.49.0
 	golang.org/x/oauth2 v0.36.0
 )

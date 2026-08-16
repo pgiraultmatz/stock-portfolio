@@ -2,6 +2,15 @@ name: RSI Divergence Alerts
 
 on:
   workflow_dispatch:
+    inputs:
+      timeframe:
+        description: RSI divergence timeframe to check
+        required: true
+        default: daily
+        type: choice
+        options:
+          - daily
+          - weekly
 
 env:
   GO_VERSION: '1.25.x'
@@ -23,14 +32,31 @@ jobs:
 
       - name: Set date
         id: date
-        run: echo "TODAY=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        run: |
+          TIMEFRAME="${{ inputs.timeframe || 'daily' }}"
+          TODAY="$(date +'%Y-%m-%d')"
+          echo "TODAY=$TODAY" >> $GITHUB_OUTPUT
+          echo "TIMEFRAME=$TIMEFRAME" >> $GITHUB_OUTPUT
+          if [ "$TIMEFRAME" = "weekly" ]; then
+            echo "STATE_FILE=.divergence-weekly-state.json" >> $GITHUB_OUTPUT
+            echo "OUTPUT_FILE=divergences-weekly.html" >> $GITHUB_OUTPUT
+            echo "CACHE_PREFIX=weekly-divergence-alerts" >> $GITHUB_OUTPUT
+            echo "CACHE_SCOPE=$(date +'%G-W%V')" >> $GITHUB_OUTPUT
+            echo "SUBJECT_LABEL=Weekly RSI Divergence Alert" >> $GITHUB_OUTPUT
+          else
+            echo "STATE_FILE=.divergence-state.json" >> $GITHUB_OUTPUT
+            echo "OUTPUT_FILE=divergences.html" >> $GITHUB_OUTPUT
+            echo "CACHE_PREFIX=divergence-alerts" >> $GITHUB_OUTPUT
+            echo "CACHE_SCOPE=$TODAY" >> $GITHUB_OUTPUT
+            echo "SUBJECT_LABEL=RSI Divergence Alert" >> $GITHUB_OUTPUT
+          fi
 
       - name: Restore divergence state
         uses: actions/cache/restore@v4
         with:
-          path: .divergence-state.json
-          key: divergence-alerts-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
-          restore-keys: divergence-alerts-${{ steps.date.outputs.TODAY }}-
+          path: ${{ steps.date.outputs.STATE_FILE }}
+          key: ${{ steps.date.outputs.CACHE_PREFIX }}-${{ steps.date.outputs.CACHE_SCOPE }}-${{ github.run_number }}
+          restore-keys: ${{ steps.date.outputs.CACHE_PREFIX }}-${{ steps.date.outputs.CACHE_SCOPE }}-
 
       - name: Build application
         run: go build -o stock-checker ./cmd/stock-checker
@@ -39,33 +65,33 @@ jobs:
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: ./stock-checker -config config.json -check-divergences -divergences-output divergences.html -divergences-state .divergence-state.json -verbose
+        run: ./stock-checker -config config.json -check-divergences -divergences-timeframe ${{ steps.date.outputs.TIMEFRAME }} -divergences-output ${{ steps.date.outputs.OUTPUT_FILE }} -divergences-state ${{ steps.date.outputs.STATE_FILE }} -verbose
 
       - name: Save divergence state
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: .divergence-state.json
-          key: divergence-alerts-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
+          path: ${{ steps.date.outputs.STATE_FILE }}
+          key: ${{ steps.date.outputs.CACHE_PREFIX }}-${{ steps.date.outputs.CACHE_SCOPE }}-${{ github.run_number }}
 
       - name: Send divergence email
-        if: hashFiles('divergences.html') != ''
+        if: hashFiles(steps.date.outputs.OUTPUT_FILE) != ''
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "RSI Divergence Alert — ${{ steps.date.outputs.TODAY }}"
-          html_body: file://divergences.html
+          subject: "${{ steps.date.outputs.SUBJECT_LABEL }} — ${{ steps.date.outputs.TODAY }}"
+          html_body: file://${{ steps.date.outputs.OUTPUT_FILE }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>
           secure: true
 
       - name: Upload divergence artifact
-        if: hashFiles('divergences.html') != ''
+        if: hashFiles(steps.date.outputs.OUTPUT_FILE) != ''
         uses: actions/upload-artifact@v4
         with:
-          name: divergence-alerts-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
-          path: divergences.html
+          name: ${{ steps.date.outputs.CACHE_PREFIX }}-${{ steps.date.outputs.TODAY }}-${{ github.run_number }}
+          path: ${{ steps.date.outputs.OUTPUT_FILE }}
           retention-days: 7

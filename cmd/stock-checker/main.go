@@ -72,7 +72,8 @@ func main() {
 	cryptoOnly := flag.Bool("crypto-only", false, "Restrict alert checks to crypto assets only (for off-market-hours runs)")
 	checkDivergences := flag.Bool("check-divergences", false, "Check RSI divergence alerts and write report if any are triggered")
 	divergencesOutput := flag.String("divergences-output", "divergences.html", "Path to write the RSI divergences HTML report")
-	divergencesState := flag.String("divergences-state", ".divergence-state.json", "Path to RSI divergence alert state")
+	divergencesState := flag.String("divergences-state", "", "Path to RSI divergence alert state")
+	divergencesTimeframe := flag.String("divergences-timeframe", "daily", "RSI divergence timeframe: daily or weekly")
 	flag.Parse()
 
 	// Setup logging
@@ -105,7 +106,12 @@ func main() {
 	}
 
 	if *checkDivergences {
-		if err := runDivergenceAlerts(ctx, cfg, *divergencesOutput, *divergencesState, logger); err != nil {
+		timeframe, err := divergencealerts.ParseTimeframe(*divergencesTimeframe)
+		if err != nil {
+			logger.Error("invalid divergence timeframe", "error", err)
+			os.Exit(1)
+		}
+		if err := runDivergenceAlerts(ctx, cfg, *divergencesOutput, *divergencesState, timeframe, logger); err != nil {
 			logger.Error("divergence check failed", "error", err)
 			os.Exit(1)
 		}
@@ -629,12 +635,12 @@ func runAlerts(ctx context.Context, cfg *config.Config, outputPath string, crypt
 
 // runDivergenceAlerts checks recent RSI bullish/bearish divergences using the
 // shared stock-portfolio chart engine. It writes a separate HTML report only
-// when a new divergence is detected for the current day.
-func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath string, statePath string, logger *slog.Logger) error {
+// when a new divergence is detected for the current timeframe scope.
+func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath string, statePath string, timeframe divergencealerts.Timeframe, logger *slog.Logger) error {
 	if statePath == "" {
-		statePath = ".divergence-state.json"
+		statePath = timeframe.DefaultStatePath()
 	}
-	state, err := divergencealerts.LoadState(statePath)
+	state, err := divergencealerts.LoadStateForTimeframe(statePath, timeframe)
 	if err != nil {
 		return fmt.Errorf("loading divergence state: %w", err)
 	}
@@ -648,13 +654,13 @@ func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath str
 		default:
 		}
 
-		alertsForStock, err := client.Check(ctx, stock)
+		alertsForStock, err := client.Check(ctx, stock, timeframe)
 		if err != nil {
-			logger.Warn("failed to check divergences", "ticker", stock.Ticker, "error", err)
+			logger.Warn("failed to check divergences", "ticker", stock.Ticker, "timeframe", timeframe.String(), "error", err)
 			continue
 		}
 		for _, alert := range alertsForStock {
-			key := divergencealerts.Key(alert.Stock.Ticker, alert.Divergence)
+			key := divergencealerts.Key(alert.Stock.Ticker, timeframe, alert.Divergence)
 			if state.Has(key) {
 				continue
 			}
@@ -668,16 +674,16 @@ func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath str
 	}
 
 	if len(triggered) == 0 {
-		logger.Info("no new RSI divergences triggered")
+		logger.Info("no new RSI divergences triggered", "timeframe", timeframe.String())
 		return nil
 	}
 
-	logger.Info("RSI divergences triggered", "count", len(triggered))
+	logger.Info("RSI divergences triggered", "count", len(triggered), "timeframe", timeframe.String())
 	for _, alert := range triggered {
-		logger.Info("divergence", "ticker", alert.Stock.Ticker, "kind", alert.Divergence.Kind, "from", alert.Divergence.FromTime, "to", alert.Divergence.ToTime)
+		logger.Info("divergence", "ticker", alert.Stock.Ticker, "timeframe", timeframe.String(), "kind", alert.Divergence.Kind, "from", alert.Divergence.FromTime, "to", alert.Divergence.ToTime)
 	}
 
-	html := divergencealerts.GenerateReport(triggered)
+	html := divergencealerts.GenerateReportForTimeframe(triggered, timeframe)
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
 		return fmt.Errorf("writing divergence report: %w", err)
 	}

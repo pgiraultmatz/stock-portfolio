@@ -563,6 +563,20 @@ func (s *Server) quotesYahoo(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
+	streamQuotes := fetchYahooStreamQuotes(r.Context(), tickers, 15*time.Second)
+	for ticker, streamQuote := range streamQuotes {
+		extended := chartExtendedMarketFromStream(streamQuote)
+		if extended == nil {
+			continue
+		}
+		result, ok := results[ticker]
+		if !ok {
+			continue
+		}
+		result.ExtendedMarket = extended
+		results[ticker] = result
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
 }
@@ -4593,7 +4607,7 @@ func (s *Server) computeAndCachePerfTR(userID string) (*PerfTRResponse, error) {
 		}
 		allTxs = append(allTxs, txs...)
 	}
-	sort.Slice(allTxs, func(i, j int) bool { return allTxs[i].Date < allTxs[j].Date })
+	sortTRTransactions(allTxs)
 
 	monthly := calcPerfPnL(allTxs)
 	if monthly == nil {

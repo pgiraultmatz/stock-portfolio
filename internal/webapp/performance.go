@@ -12,6 +12,7 @@ import (
 
 type TRTransaction struct {
 	Date       string
+	DateTime   string
 	Type       string
 	AssetClass string
 	Name       string
@@ -105,7 +106,7 @@ func parseTRCSV(content string) ([]TRTransaction, string, error) {
 			sym = get(row, "name")
 		}
 		txs = append(txs, TRTransaction{
-			Date: date, Type: typ,
+			Date: date, DateTime: get(row, "datetime"), Type: typ,
 			AssetClass: get(row, "asset_class"),
 			Name:       get(row, "name"),
 			Symbol:     sym,
@@ -116,7 +117,7 @@ func parseTRCSV(content string) ([]TRTransaction, string, error) {
 			Tax:        pf(get(row, "tax")),
 		})
 	}
-	sort.Slice(txs, func(i, j int) bool { return txs[i].Date < txs[j].Date })
+	sortTRTransactions(txs)
 
 	year := ""
 	if len(txs) > 0 {
@@ -125,6 +126,15 @@ func parseTRCSV(content string) ([]TRTransaction, string, error) {
 		}
 	}
 	return txs, year, nil
+}
+
+func sortTRTransactions(txs []TRTransaction) {
+	sort.SliceStable(txs, func(i, j int) bool {
+		if txs[i].Date != txs[j].Date {
+			return txs[i].Date < txs[j].Date
+		}
+		return txs[i].DateTime < txs[j].DateTime
+	})
 }
 
 // ── FIFO engine ───────────────────────────────────────────────────────────────

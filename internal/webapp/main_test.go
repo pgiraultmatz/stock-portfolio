@@ -1,7 +1,12 @@
 package webapp
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"math"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -442,6 +447,95 @@ func TestChartExtendedMarketFromIntradayTrustsExplicitPremarketState(t *testing.
 	if extended == nil || extended.Session != "pre" || extended.Price != prePrice {
 		t.Fatalf("expected explicit pre-market meta quote, got %+v", extended)
 	}
+}
+
+func TestDecodeYahooStreamOvernightQuote(t *testing.T) {
+	var message []byte
+	message = appendProtoString(message, 1, "MU")
+	message = appendProtoFloat(message, 2, 1149.50)
+	message = appendProtoSint(message, 3, 1782816816000)
+	message = appendProtoVarint(message, 7<<3, 4)
+	message = appendProtoFloat(message, 8, 0.36846)
+	message = appendProtoFloat(message, 12, 4.22)
+
+	quote, ok := decodeYahooStreamQuote([]byte(base64.StdEncoding.EncodeToString(message)))
+	if !ok {
+		t.Fatal("expected stream quote to decode")
+	}
+	if quote.Symbol != "MU" || math.Abs(quote.Price-1149.50) > 0.01 || quote.MarketHours != 4 {
+		t.Fatalf("unexpected stream quote: %+v", quote)
+	}
+	extended := chartExtendedMarketFromStream(quote)
+	if extended == nil || extended.Session != "overnight" || extended.MarketState != "OVERNIGHT" {
+		t.Fatalf("expected overnight extended quote, got %+v", extended)
+	}
+	if extended.Time != 1782816816 {
+		t.Fatalf("expected milliseconds converted to seconds, got %d", extended.Time)
+	}
+
+	envelope := []byte(`{"message":"` + base64.StdEncoding.EncodeToString(message) + `"}`)
+	wrappedQuote, ok := decodeYahooStreamQuote(envelope)
+	if !ok || wrappedQuote.Symbol != "MU" || wrappedQuote.MarketHours != 4 {
+		t.Fatalf("expected version 2 envelope to decode, got %+v", wrappedQuote)
+	}
+}
+
+func TestFetchYahooStreamQuoteLive(t *testing.T) {
+	if os.Getenv("LIVE_YAHOO_TEST") == "" {
+		t.Skip("set LIVE_YAHOO_TEST=1 to query Yahoo's live streamer")
+	}
+	symbol := os.Getenv("LIVE_YAHOO_SYMBOL")
+	if symbol == "" {
+		symbol = "MU"
+	}
+	quotes := fetchYahooStreamQuotes(t.Context(), []string{symbol}, 18*time.Second)
+	quote, ok := quotes[symbol]
+	if !ok {
+		t.Fatalf("expected a live %s stream quote", symbol)
+	}
+	if quote.Price <= 0 {
+		t.Fatalf("expected a positive live price, got %+v", quote)
+	}
+	t.Logf("live Yahoo quote: %+v", quote)
+}
+
+func TestQuotesYahooLiveIncludesExtendedMarket(t *testing.T) {
+	if os.Getenv("LIVE_YAHOO_TEST") == "" {
+		t.Skip("set LIVE_YAHOO_TEST=1 to query Yahoo's live APIs")
+	}
+	request := httptest.NewRequest("GET", "/api/quotes?tickers=MU", nil)
+	response := httptest.NewRecorder()
+	(&Server{}).quotesYahoo(response, request)
+	if response.Code != 200 {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	t.Logf("live quotes response: %s", response.Body.String())
+	if !strings.Contains(response.Body.String(), `"extendedMarket"`) {
+		t.Fatalf("expected extended market quote: %s", response.Body.String())
+	}
+}
+
+func appendProtoString(dst []byte, field int, value string) []byte {
+	dst = appendProtoVarint(dst, field<<3|2)
+	dst = binary.AppendUvarint(dst, uint64(len(value)))
+	return append(dst, value...)
+}
+
+func appendProtoFloat(dst []byte, field int, value float32) []byte {
+	dst = appendProtoVarint(dst, field<<3|5)
+	return binary.LittleEndian.AppendUint32(dst, math.Float32bits(value))
+}
+
+func appendProtoSint(dst []byte, field int, value int64) []byte {
+	zigzag := uint64(value<<1) ^ uint64(value>>63)
+	return appendProtoVarint(dst, field<<3, int(zigzag))
+}
+
+func appendProtoVarint(dst []byte, values ...int) []byte {
+	for _, value := range values {
+		dst = binary.AppendUvarint(dst, uint64(value))
+	}
+	return dst
 }
 
 func TestYahooChartReferenceClosePrefersPreviousClose(t *testing.T) {

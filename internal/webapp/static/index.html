@@ -505,11 +505,11 @@
     .charts-meta { font-size: 12px; color: #8b949e; }
     .charts-extended { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 1px 6px; border: 1px solid #30363d; border-radius: 999px; background: #161b22; color: #c9d1d9; font-family: 'SF Mono', monospace; font-size: 10px; vertical-align: middle; }
     .charts-extended.pre { border-color: rgba(210,153,34,.45); color: #d29922; }
-    .charts-extended.post { border-color: rgba(88,166,255,.45); color: #58a6ff; }
+    .charts-extended.post, .charts-extended.overnight { border-color: rgba(88,166,255,.45); color: #58a6ff; }
     .charts-watch-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
     .charts-watch-extended { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; color: #8b949e; font-family: 'SF Mono', monospace; font-size: 9px; line-height: 1.1; white-space: nowrap; }
     .charts-watch-extended.pre { color: #d29922; }
-    .charts-watch-extended.post { color: #58a6ff; }
+    .charts-watch-extended.post, .charts-watch-extended.overnight { color: #58a6ff; }
     .charts-analysis { display: none; grid-template-columns: 190px minmax(0, 1fr); gap: 12px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #21262d; border-radius: 6px; background: #090d13; }
     .charts-analysis.show { display: grid; }
     .charts-analysis-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -2492,9 +2492,9 @@ function formatChartPrice(v, currency) {
 
 function formatExtendedMarketBadge(extended, currency, options = {}) {
   if (!extended || !Number.isFinite(Number(extended.price)) || Number(extended.price) <= 0) return '';
-  const session = extended.session === 'pre' ? 'pre' : 'post';
+  const session = ['pre', 'post', 'overnight'].includes(extended.session) ? extended.session : 'post';
   const icon = session === 'pre' ? '☀' : '☾';
-  const label = session === 'pre' ? 'PRE' : 'POST';
+  const label = session === 'pre' ? 'PRE' : session === 'overnight' ? 'NIGHT' : 'POST';
   const price = formatChartPrice(Number(extended.price), currency);
   const pct = Number(extended.changePercent);
   const moveCls = Number.isFinite(pct) && pct < 0 ? 'perf-mc-neg' : 'perf-mc-pos';
@@ -2535,7 +2535,7 @@ window.addEventListener('resize', () => {
 });
 
 // ---- quotes ----
-const QUOTES_CACHE_VERSION = '2';
+const QUOTES_CACHE_VERSION = '6';
 if (localStorage.getItem('quotesCacheVersion') !== QUOTES_CACHE_VERSION) {
   localStorage.removeItem('quotesCache');
   localStorage.removeItem('quotesLastFetched');

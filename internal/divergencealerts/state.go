@@ -2,6 +2,7 @@ package divergencealerts
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"time"
 )
@@ -12,8 +13,23 @@ type State struct {
 }
 
 func LoadState(path string) (*State, error) {
-	today := time.Now().Format("2006-01-02")
-	state := &State{Date: today, Sent: make(map[string]bool)}
+	return LoadStateForScope(path, time.Now().Format("2006-01-02"))
+}
+
+func LoadStateForTimeframe(path string, timeframe Timeframe) (*State, error) {
+	return LoadStateForScope(path, StateScope(timeframe, time.Now()))
+}
+
+func StateScope(timeframe Timeframe, t time.Time) string {
+	if timeframe == Weekly {
+		year, week := t.ISOWeek()
+		return fmt.Sprintf("%04d-W%02d", year, week)
+	}
+	return t.Format("2006-01-02")
+}
+
+func LoadStateForScope(path string, scope string) (*State, error) {
+	state := &State{Date: scope, Sent: make(map[string]bool)}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -24,8 +40,8 @@ func LoadState(path string) (*State, error) {
 	if err := json.Unmarshal(data, state); err != nil {
 		return nil, err
 	}
-	if state.Date != today {
-		state.Date = today
+	if state.Date != scope {
+		state.Date = scope
 		state.Sent = make(map[string]bool)
 	}
 	if state.Sent == nil {

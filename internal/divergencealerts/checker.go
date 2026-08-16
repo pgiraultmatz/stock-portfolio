@@ -20,6 +20,45 @@ type Alert struct {
 	LastClose  float64
 }
 
+type Timeframe string
+
+const (
+	Daily  Timeframe = "daily"
+	Weekly Timeframe = "weekly"
+)
+
+func ParseTimeframe(value string) (Timeframe, error) {
+	switch Timeframe(value) {
+	case "", Daily:
+		return Daily, nil
+	case Weekly:
+		return Weekly, nil
+	default:
+		return "", fmt.Errorf("unsupported divergence timeframe %q", value)
+	}
+}
+
+func (tf Timeframe) String() string {
+	if tf == "" {
+		return string(Daily)
+	}
+	return string(tf)
+}
+
+func (tf Timeframe) DefaultStatePath() string {
+	if tf == Weekly {
+		return ".divergence-weekly-state.json"
+	}
+	return ".divergence-state.json"
+}
+
+func (tf Timeframe) yahooRangeInterval() (string, string) {
+	if tf == Weekly {
+		return "5y", "1wk"
+	}
+	return "1y", "1d"
+}
+
 type Client struct {
 	baseURL    string
 	userAgent  string
@@ -46,8 +85,8 @@ func NewClient(cfg config.YahooAPIConfig) *Client {
 	}
 }
 
-func (c *Client) Check(ctx context.Context, stock models.Stock) ([]Alert, error) {
-	candles, err := c.fetchCandles(ctx, stock.Ticker)
+func (c *Client) Check(ctx context.Context, stock models.Stock, timeframe Timeframe) ([]Alert, error) {
+	candles, err := c.fetchCandles(ctx, stock.Ticker, timeframe)
 	if err != nil {
 		return nil, err
 	}
@@ -79,12 +118,12 @@ func (c *Client) Check(ctx context.Context, stock models.Stock) ([]Alert, error)
 	return alerts, nil
 }
 
-func Key(ticker string, div chartcalc.Divergence) string {
-	return fmt.Sprintf("%s:%s:%d:%d", ticker, div.Kind, div.FromTime, div.ToTime)
+func Key(ticker string, timeframe Timeframe, div chartcalc.Divergence) string {
+	return fmt.Sprintf("%s:%s:%s:%d:%d", timeframe.String(), ticker, div.Kind, div.FromTime, div.ToTime)
 }
 
-func (c *Client) fetchCandles(ctx context.Context, ticker string) ([]chartcalc.Candle, error) {
-	u := fmt.Sprintf("%s/%s?range=1y&interval=1d", c.baseURL, url.PathEscape(ticker))
+func (c *Client) fetchCandles(ctx context.Context, ticker string, timeframe Timeframe) ([]chartcalc.Candle, error) {
+	u := c.chartURL(ticker, timeframe)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -132,6 +171,11 @@ func (c *Client) fetchCandles(ctx context.Context, ticker string) ([]chartcalc.C
 		})
 	}
 	return candles, nil
+}
+
+func (c *Client) chartURL(ticker string, timeframe Timeframe) string {
+	r, interval := timeframe.yahooRangeInterval()
+	return fmt.Sprintf("%s/%s?range=%s&interval=%s", c.baseURL, url.PathEscape(ticker), url.QueryEscape(r), url.QueryEscape(interval))
 }
 
 type yahooChartResponse struct {

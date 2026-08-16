@@ -8,6 +8,10 @@ import (
 )
 
 func GenerateReport(alerts []Alert) string {
+	return GenerateReportForTimeframe(alerts, Daily)
+}
+
+func GenerateReportForTimeframe(alerts []Alert, timeframe Timeframe) string {
 	sort.SliceStable(alerts, func(i, j int) bool {
 		if alerts[i].Divergence.Kind == alerts[j].Divergence.Kind {
 			return alerts[i].Stock.Ticker < alerts[j].Stock.Ticker
@@ -38,7 +42,7 @@ func GenerateReport(alerts []Alert) string {
 </head>
 <body>
 `)
-	sb.WriteString(fmt.Sprintf("<h2>RSI Divergence Alerts — %s</h2>\n", time.Now().Format("02/01/2006")))
+	sb.WriteString(fmt.Sprintf("<h2>RSI Divergence Alerts (%s) — %s</h2>\n", strings.ToUpper(timeframe.String()), time.Now().Format("02/01/2006")))
 	sb.WriteString("<table>\n")
 	sb.WriteString("  <tr><th>Stock</th><th>Signal</th><th>Pivot dates</th><th>Price move</th><th>RSI move</th><th>Last close</th></tr>\n")
 	for _, alert := range alerts {
