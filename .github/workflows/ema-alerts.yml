@@ -1,0 +1,112 @@
+name: EMA Proximity Alerts
+
+on:
+  workflow_dispatch:
+    inputs:
+      timeframe:
+        description: EMA timeframe to check
+        required: true
+        default: daily
+        type: choice
+        options:
+          - daily
+          - weekly
+      threshold:
+        description: Maximum close distance from EMA, in percent
+        required: true
+        default: "2.0"
+
+env:
+  GO_VERSION: '1.25.x'
+
+jobs:
+  check-ema-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set run metadata
+        id: meta
+        run: |
+          TIMEFRAME="${{ inputs.timeframe || 'daily' }}"
+          THRESHOLD="${{ inputs.threshold || '2.0' }}"
+          TODAY="$(date +'%Y-%m-%d')"
+          echo "TODAY=$TODAY" >> $GITHUB_OUTPUT
+          echo "TIMEFRAME=$TIMEFRAME" >> $GITHUB_OUTPUT
+          echo "THRESHOLD=$THRESHOLD" >> $GITHUB_OUTPUT
+          if [ "$TIMEFRAME" = "weekly" ]; then
+            echo "STATE_FILE=.ema-weekly-state.json" >> $GITHUB_OUTPUT
+            echo "OUTPUT_FILE=ema-alerts-weekly.html" >> $GITHUB_OUTPUT
+            echo "CACHE_PREFIX=weekly-ema-alerts" >> $GITHUB_OUTPUT
+            echo "CACHE_SCOPE=$(date +'%G-W%V')" >> $GITHUB_OUTPUT
+            echo "SUBJECT_LABEL=Weekly EMA Proximity Alert" >> $GITHUB_OUTPUT
+          else
+            echo "STATE_FILE=.ema-state.json" >> $GITHUB_OUTPUT
+            echo "OUTPUT_FILE=ema-alerts.html" >> $GITHUB_OUTPUT
+            echo "CACHE_PREFIX=ema-alerts" >> $GITHUB_OUTPUT
+            echo "CACHE_SCOPE=$TODAY" >> $GITHUB_OUTPUT
+            echo "SUBJECT_LABEL=EMA Proximity Alert" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Restore EMA alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.meta.outputs.STATE_FILE }}
+          key: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-${{ github.run_number }}
+          restore-keys: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-
+
+      - name: Build application
+        run: go build -o stock-checker ./cmd/stock-checker
+
+      - name: Check EMA proximity
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: ./stock-checker -config config.json -check-ema-alerts -ema-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -ema-threshold ${{ steps.meta.outputs.THRESHOLD }} -ema-output ${{ steps.meta.outputs.OUTPUT_FILE }} -ema-state ${{ steps.meta.outputs.STATE_FILE }} -verbose
+
+      - name: Save EMA alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.meta.outputs.STATE_FILE }}
+          key: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-${{ github.run_number }}
+
+      - name: Check report
+        id: report
+        run: |
+          if [ -f "${{ steps.meta.outputs.OUTPUT_FILE }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send EMA email
+        if: steps.report.outputs.exists == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "${{ steps.meta.outputs.SUBJECT_LABEL }} — ${{ steps.meta.outputs.TODAY }}"
+          html_body: file://${{ steps.meta.outputs.OUTPUT_FILE }}
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>
+          secure: true
+
+      - name: Upload EMA artifact
+        if: steps.report.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.TODAY }}-${{ github.run_number }}
+          path: ${{ steps.meta.outputs.OUTPUT_FILE }}
+          retention-days: 7

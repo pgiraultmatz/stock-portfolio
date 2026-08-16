@@ -18,9 +18,12 @@ import (
 	"stock-portfolio/internal/alerts"
 	"stock-portfolio/internal/config"
 	"stock-portfolio/internal/divergencealerts"
+	"stock-portfolio/internal/emaalerts"
 	"stock-portfolio/internal/macro"
+	"stock-portfolio/internal/marketdigest"
 	"stock-portfolio/internal/models"
 	"stock-portfolio/internal/report"
+	"stock-portfolio/internal/technicalalerts"
 	"stock-portfolio/internal/twitter"
 	"stock-portfolio/internal/yahoo"
 )
@@ -74,6 +77,17 @@ func main() {
 	divergencesOutput := flag.String("divergences-output", "divergences.html", "Path to write the RSI divergences HTML report")
 	divergencesState := flag.String("divergences-state", "", "Path to RSI divergence alert state")
 	divergencesTimeframe := flag.String("divergences-timeframe", "daily", "RSI divergence timeframe: daily or weekly")
+	checkEMA := flag.Bool("check-ema-alerts", false, "Check EMA proximity alerts and write report if any are triggered")
+	emaOutput := flag.String("ema-output", "ema-alerts.html", "Path to write the EMA proximity HTML report")
+	emaState := flag.String("ema-state", "", "Path to EMA proximity alert state")
+	emaTimeframe := flag.String("ema-timeframe", "daily", "EMA proximity timeframe: daily or weekly")
+	emaThreshold := flag.Float64("ema-threshold", 2.0, "Maximum close distance from EMA, in percent")
+	checkMarketDigest := flag.Bool("check-market-digest", false, "Check end-of-session market signals and write one digest report if any are triggered")
+	marketDigestOutput := flag.String("market-digest-output", "market-signals.html", "Path to write the market signal digest HTML report")
+	marketDigestTimeframe := flag.String("market-digest-timeframe", "daily", "Market signal digest timeframe: daily or weekly")
+	marketDigestEMAThreshold := flag.Float64("market-digest-ema-threshold", 1.5, "Maximum close distance from EMA for the market digest, in percent")
+	marketDigestDivergencesState := flag.String("market-digest-divergences-state", "", "Path to RSI divergence state for the market digest")
+	marketDigestTechnicalState := flag.String("market-digest-technical-state", "", "Path to technical signal state for the market digest")
 	flag.Parse()
 
 	// Setup logging
@@ -113,6 +127,27 @@ func main() {
 		}
 		if err := runDivergenceAlerts(ctx, cfg, *divergencesOutput, *divergencesState, timeframe, logger); err != nil {
 			logger.Error("divergence check failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *checkEMA {
+		timeframe, err := emaalerts.ParseTimeframe(*emaTimeframe)
+		if err != nil {
+			logger.Error("invalid EMA timeframe", "error", err)
+			os.Exit(1)
+		}
+		if err := runEMAAlerts(ctx, cfg, *emaOutput, *emaState, timeframe, *emaThreshold, logger); err != nil {
+			logger.Error("EMA alert check failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *checkMarketDigest {
+		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestDivergencesState, *marketDigestTechnicalState, logger); err != nil {
+			logger.Error("market digest check failed", "error", err)
 			os.Exit(1)
 		}
 		return
@@ -637,12 +672,36 @@ func runAlerts(ctx context.Context, cfg *config.Config, outputPath string, crypt
 // shared stock-portfolio chart engine. It writes a separate HTML report only
 // when a new divergence is detected for the current timeframe scope.
 func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath string, statePath string, timeframe divergencealerts.Timeframe, logger *slog.Logger) error {
+	triggered, err := collectDivergenceAlerts(ctx, cfg, statePath, timeframe, logger)
+	if err != nil {
+		return err
+	}
+
+	if len(triggered) == 0 {
+		logger.Info("no new RSI divergences triggered", "timeframe", timeframe.String())
+		return nil
+	}
+
+	logger.Info("RSI divergences triggered", "count", len(triggered), "timeframe", timeframe.String())
+	for _, alert := range triggered {
+		logger.Info("divergence", "ticker", alert.Stock.Ticker, "timeframe", timeframe.String(), "kind", alert.Divergence.Kind, "from", alert.Divergence.FromTime, "to", alert.Divergence.ToTime)
+	}
+
+	html := divergencealerts.GenerateReportForTimeframe(triggered, timeframe)
+	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
+		return fmt.Errorf("writing divergence report: %w", err)
+	}
+	logger.Info("divergence report written", "path", outputPath)
+	return nil
+}
+
+func collectDivergenceAlerts(ctx context.Context, cfg *config.Config, statePath string, timeframe divergencealerts.Timeframe, logger *slog.Logger) ([]divergencealerts.Alert, error) {
 	if statePath == "" {
 		statePath = timeframe.DefaultStatePath()
 	}
 	state, err := divergencealerts.LoadStateForTimeframe(statePath, timeframe)
 	if err != nil {
-		return fmt.Errorf("loading divergence state: %w", err)
+		return nil, fmt.Errorf("loading divergence state: %w", err)
 	}
 
 	client := divergencealerts.NewClient(cfg.YahooAPI)
@@ -650,7 +709,7 @@ func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath str
 	for _, stock := range cfg.Stocks {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 
@@ -673,22 +732,152 @@ func runDivergenceAlerts(ctx context.Context, cfg *config.Config, outputPath str
 		logger.Warn("failed to save divergence state", "error", err)
 	}
 
+	return triggered, nil
+}
+
+// runEMAAlerts checks whether the latest daily or weekly candle is touching or
+// closing near EMA50, EMA100, or EMA200.
+func runEMAAlerts(ctx context.Context, cfg *config.Config, outputPath string, statePath string, timeframe emaalerts.Timeframe, thresholdPercent float64, logger *slog.Logger) error {
+	triggered, err := collectEMAAlerts(ctx, cfg, statePath, timeframe, thresholdPercent, logger)
+	if err != nil {
+		return err
+	}
+
 	if len(triggered) == 0 {
-		logger.Info("no new RSI divergences triggered", "timeframe", timeframe.String())
+		logger.Info("no new EMA proximity alerts triggered", "timeframe", timeframe.String(), "threshold", thresholdPercent)
 		return nil
 	}
 
-	logger.Info("RSI divergences triggered", "count", len(triggered), "timeframe", timeframe.String())
+	logger.Info("EMA proximity alerts triggered", "count", len(triggered), "timeframe", timeframe.String(), "threshold", thresholdPercent)
 	for _, alert := range triggered {
-		logger.Info("divergence", "ticker", alert.Stock.Ticker, "timeframe", timeframe.String(), "kind", alert.Divergence.Kind, "from", alert.Divergence.FromTime, "to", alert.Divergence.ToTime)
+		logger.Info("EMA proximity", "ticker", alert.Stock.Ticker, "timeframe", timeframe.String(), "period", alert.Period, "distance", fmt.Sprintf("%.2f%%", alert.DistancePercent), "touched", alert.Touched)
 	}
 
-	html := divergencealerts.GenerateReportForTimeframe(triggered, timeframe)
+	html := emaalerts.GenerateReport(triggered, timeframe, thresholdPercent)
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
-		return fmt.Errorf("writing divergence report: %w", err)
+		return fmt.Errorf("writing EMA alert report: %w", err)
 	}
-	logger.Info("divergence report written", "path", outputPath)
+	logger.Info("EMA alert report written", "path", outputPath)
 	return nil
+}
+
+func collectEMAAlerts(ctx context.Context, cfg *config.Config, statePath string, timeframe emaalerts.Timeframe, thresholdPercent float64, logger *slog.Logger) ([]emaalerts.Alert, error) {
+	if thresholdPercent < 0 {
+		return nil, fmt.Errorf("EMA threshold must be positive")
+	}
+	if statePath == "" {
+		statePath = timeframe.DefaultStatePath()
+	}
+	state, err := emaalerts.LoadStateForTimeframe(statePath, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("loading EMA alert state: %w", err)
+	}
+
+	client := emaalerts.NewClient(cfg.YahooAPI)
+	var triggered []emaalerts.Alert
+	for _, stock := range cfg.Stocks {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		alertsForStock, err := client.Check(ctx, stock, timeframe, thresholdPercent)
+		if err != nil {
+			logger.Warn("failed to check EMA proximity", "ticker", stock.Ticker, "timeframe", timeframe.String(), "error", err)
+			continue
+		}
+		for _, alert := range alertsForStock {
+			key := emaalerts.Key(alert)
+			if state.Has(key) {
+				continue
+			}
+			state.Mark(key)
+			triggered = append(triggered, alert)
+		}
+	}
+
+	if err := state.Save(statePath); err != nil {
+		logger.Warn("failed to save EMA alert state", "error", err)
+	}
+
+	return triggered, nil
+}
+
+func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, divergencesStatePath string, technicalStatePath string, logger *slog.Logger) error {
+	divergenceTimeframe, err := divergencealerts.ParseTimeframe(timeframeValue)
+	if err != nil {
+		return err
+	}
+	technicalTimeframe, err := technicalalerts.ParseTimeframe(timeframeValue)
+	if err != nil {
+		return err
+	}
+
+	divergences, err := collectDivergenceAlerts(ctx, cfg, divergencesStatePath, divergenceTimeframe, logger)
+	if err != nil {
+		return err
+	}
+	technical, err := collectTechnicalAlerts(ctx, cfg, technicalStatePath, technicalTimeframe, emaThreshold, logger)
+	if err != nil {
+		return err
+	}
+
+	if len(divergences) == 0 && len(technical) == 0 {
+		logger.Info("no new market signals triggered", "timeframe", timeframeValue, "ema_threshold", emaThreshold)
+		return nil
+	}
+
+	logger.Info("market signal digest triggered", "timeframe", timeframeValue, "divergences", len(divergences), "technical", len(technical), "ema_threshold", emaThreshold)
+	html := marketdigest.GenerateReport(divergences, technical, timeframeValue, emaThreshold)
+	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
+		return fmt.Errorf("writing market signal digest: %w", err)
+	}
+	logger.Info("market signal digest written", "path", outputPath)
+	return nil
+}
+
+func collectTechnicalAlerts(ctx context.Context, cfg *config.Config, statePath string, timeframe technicalalerts.Timeframe, emaThresholdPercent float64, logger *slog.Logger) ([]technicalalerts.Alert, error) {
+	if emaThresholdPercent < 0 {
+		return nil, fmt.Errorf("EMA threshold must be positive")
+	}
+	if statePath == "" {
+		statePath = timeframe.DefaultStatePath()
+	}
+	state, err := technicalalerts.LoadStateForTimeframe(statePath, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("loading technical alert state: %w", err)
+	}
+
+	client := technicalalerts.NewClient(cfg.YahooAPI)
+	var triggered []technicalalerts.Alert
+	for _, stock := range cfg.Stocks {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		alertsForStock, err := client.Check(ctx, stock, timeframe, emaThresholdPercent)
+		if err != nil {
+			logger.Warn("failed to check technical signals", "ticker", stock.Ticker, "timeframe", timeframe.String(), "error", err)
+			continue
+		}
+		for _, alert := range alertsForStock {
+			key := technicalalerts.Key(alert)
+			if state.Has(key) {
+				continue
+			}
+			state.Mark(key)
+			triggered = append(triggered, alert)
+		}
+	}
+
+	if err := state.Save(statePath); err != nil {
+		logger.Warn("failed to save technical alert state", "error", err)
+	}
+
+	return triggered, nil
 }
 
 // runTwitterPrompt fetches tweets from all xGroups and writes a standalone prompt to promptOutput (or stdout).
