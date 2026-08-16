@@ -86,8 +86,6 @@ func main() {
 	marketDigestOutput := flag.String("market-digest-output", "market-signals.html", "Path to write the market signal digest HTML report")
 	marketDigestTimeframe := flag.String("market-digest-timeframe", "daily", "Market signal digest timeframe: daily or weekly")
 	marketDigestEMAThreshold := flag.Float64("market-digest-ema-threshold", 1.5, "Maximum close distance from EMA for the market digest, in percent")
-	marketDigestDivergencesState := flag.String("market-digest-divergences-state", "", "Path to RSI divergence state for the market digest")
-	marketDigestTechnicalState := flag.String("market-digest-technical-state", "", "Path to technical signal state for the market digest")
 	flag.Parse()
 
 	// Setup logging
@@ -146,7 +144,7 @@ func main() {
 	}
 
 	if *checkMarketDigest {
-		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestDivergencesState, *marketDigestTechnicalState, logger); err != nil {
+		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, logger); err != nil {
 			logger.Error("market digest check failed", "error", err)
 			os.Exit(1)
 		}
@@ -735,6 +733,26 @@ func collectDivergenceAlerts(ctx context.Context, cfg *config.Config, statePath 
 	return triggered, nil
 }
 
+func collectAllDivergenceAlerts(ctx context.Context, cfg *config.Config, timeframe divergencealerts.Timeframe, logger *slog.Logger) ([]divergencealerts.Alert, error) {
+	client := divergencealerts.NewClient(cfg.YahooAPI)
+	var triggered []divergencealerts.Alert
+	for _, stock := range cfg.Stocks {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		alertsForStock, err := client.Check(ctx, stock, timeframe)
+		if err != nil {
+			logger.Warn("failed to check divergences", "ticker", stock.Ticker, "timeframe", timeframe.String(), "error", err)
+			continue
+		}
+		triggered = append(triggered, alertsForStock...)
+	}
+	return triggered, nil
+}
+
 // runEMAAlerts checks whether the latest daily or weekly candle is touching or
 // closing near EMA50, EMA100, or EMA200.
 func runEMAAlerts(ctx context.Context, cfg *config.Config, outputPath string, statePath string, timeframe emaalerts.Timeframe, thresholdPercent float64, logger *slog.Logger) error {
@@ -804,7 +822,7 @@ func collectEMAAlerts(ctx context.Context, cfg *config.Config, statePath string,
 	return triggered, nil
 }
 
-func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, divergencesStatePath string, technicalStatePath string, logger *slog.Logger) error {
+func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, logger *slog.Logger) error {
 	divergenceTimeframe, err := divergencealerts.ParseTimeframe(timeframeValue)
 	if err != nil {
 		return err
@@ -814,11 +832,11 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 		return err
 	}
 
-	divergences, err := collectDivergenceAlerts(ctx, cfg, divergencesStatePath, divergenceTimeframe, logger)
+	divergences, err := collectAllDivergenceAlerts(ctx, cfg, divergenceTimeframe, logger)
 	if err != nil {
 		return err
 	}
-	technical, err := collectTechnicalAlerts(ctx, cfg, technicalStatePath, technicalTimeframe, emaThreshold, logger)
+	technical, err := collectAllTechnicalAlerts(ctx, cfg, technicalTimeframe, emaThreshold, logger)
 	if err != nil {
 		return err
 	}
@@ -877,6 +895,29 @@ func collectTechnicalAlerts(ctx context.Context, cfg *config.Config, statePath s
 		logger.Warn("failed to save technical alert state", "error", err)
 	}
 
+	return triggered, nil
+}
+
+func collectAllTechnicalAlerts(ctx context.Context, cfg *config.Config, timeframe technicalalerts.Timeframe, emaThresholdPercent float64, logger *slog.Logger) ([]technicalalerts.Alert, error) {
+	if emaThresholdPercent < 0 {
+		return nil, fmt.Errorf("EMA threshold must be positive")
+	}
+	client := technicalalerts.NewClient(cfg.YahooAPI)
+	var triggered []technicalalerts.Alert
+	for _, stock := range cfg.Stocks {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		alertsForStock, err := client.Check(ctx, stock, timeframe, emaThresholdPercent)
+		if err != nil {
+			logger.Warn("failed to check technical signals", "ticker", stock.Ticker, "timeframe", timeframe.String(), "error", err)
+			continue
+		}
+		triggered = append(triggered, alertsForStock...)
+	}
 	return triggered, nil
 }
 

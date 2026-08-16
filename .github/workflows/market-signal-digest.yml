@@ -46,29 +46,12 @@ jobs:
           echo "TIMEFRAME=$TIMEFRAME" >> $GITHUB_OUTPUT
           echo "EMA_THRESHOLD=$EMA_THRESHOLD" >> $GITHUB_OUTPUT
           if [ "$TIMEFRAME" = "weekly" ]; then
-            echo "DIVERGENCES_STATE=.divergence-weekly-state.json" >> $GITHUB_OUTPUT
-            echo "TECHNICAL_STATE=.technical-weekly-state.json" >> $GITHUB_OUTPUT
             echo "OUTPUT_FILE=market-signals-weekly.html" >> $GITHUB_OUTPUT
-            echo "CACHE_PREFIX=weekly-market-signal-digest" >> $GITHUB_OUTPUT
-            echo "CACHE_SCOPE=$(date +'%G-W%V')" >> $GITHUB_OUTPUT
             echo "SUBJECT_LABEL=Weekly Market Signal Digest" >> $GITHUB_OUTPUT
           else
-            echo "DIVERGENCES_STATE=.divergence-state.json" >> $GITHUB_OUTPUT
-            echo "TECHNICAL_STATE=.technical-state.json" >> $GITHUB_OUTPUT
             echo "OUTPUT_FILE=market-signals.html" >> $GITHUB_OUTPUT
-            echo "CACHE_PREFIX=market-signal-digest" >> $GITHUB_OUTPUT
-            echo "CACHE_SCOPE=$TODAY" >> $GITHUB_OUTPUT
             echo "SUBJECT_LABEL=Market Signal Digest" >> $GITHUB_OUTPUT
           fi
-
-      - name: Restore digest state
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ${{ steps.meta.outputs.DIVERGENCES_STATE }}
-            ${{ steps.meta.outputs.TECHNICAL_STATE }}
-          key: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-${{ github.run_number }}
-          restore-keys: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-
 
       - name: Build application
         run: go build -o stock-checker ./cmd/stock-checker
@@ -77,16 +60,7 @@ jobs:
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -market-digest-divergences-state ${{ steps.meta.outputs.DIVERGENCES_STATE }} -market-digest-technical-state ${{ steps.meta.outputs.TECHNICAL_STATE }} -verbose
-
-      - name: Save digest state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ steps.meta.outputs.DIVERGENCES_STATE }}
-            ${{ steps.meta.outputs.TECHNICAL_STATE }}
-          key: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-${{ github.run_number }}
+        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -verbose
 
       - name: Check report
         id: report
@@ -115,6 +89,6 @@ jobs:
         if: steps.report.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.meta.outputs.CACHE_PREFIX }}-${{ steps.meta.outputs.CACHE_SCOPE }}-${{ github.run_number }}
+          name: market-signal-digest-${{ steps.meta.outputs.TIMEFRAME }}-${{ steps.meta.outputs.TODAY }}-${{ github.run_number }}
           path: ${{ steps.meta.outputs.OUTPUT_FILE }}
           retention-days: 7
