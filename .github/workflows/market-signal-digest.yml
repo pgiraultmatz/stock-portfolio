@@ -11,10 +11,15 @@ on:
         options:
           - daily
           - weekly
-      ema_threshold:
-        description: Maximum close distance from EMA, in percent
+          - both
+      daily_ema_threshold:
+        description: Maximum close distance from daily EMA, in percent
         required: true
         default: "1.5"
+      weekly_ema_threshold:
+        description: Maximum close distance from weekly EMA, in percent
+        required: true
+        default: "3.0"
   schedule:
     - cron: "0 20 * * 1-5"
 
@@ -39,15 +44,20 @@ jobs:
       - name: Set run metadata
         id: meta
         run: |
-          TIMEFRAME="${{ inputs.timeframe || 'daily' }}"
-          EMA_THRESHOLD="${{ inputs.ema_threshold || '1.5' }}"
+          TIMEFRAME="${{ inputs.timeframe || 'both' }}"
+          DAILY_EMA_THRESHOLD="${{ inputs.daily_ema_threshold || '1.5' }}"
+          WEEKLY_EMA_THRESHOLD="${{ inputs.weekly_ema_threshold || '3.0' }}"
           TODAY="$(date +'%Y-%m-%d')"
           echo "TODAY=$TODAY" >> $GITHUB_OUTPUT
           echo "TIMEFRAME=$TIMEFRAME" >> $GITHUB_OUTPUT
-          echo "EMA_THRESHOLD=$EMA_THRESHOLD" >> $GITHUB_OUTPUT
+          echo "DAILY_EMA_THRESHOLD=$DAILY_EMA_THRESHOLD" >> $GITHUB_OUTPUT
+          echo "WEEKLY_EMA_THRESHOLD=$WEEKLY_EMA_THRESHOLD" >> $GITHUB_OUTPUT
           if [ "$TIMEFRAME" = "weekly" ]; then
             echo "OUTPUT_FILE=market-signals-weekly.html" >> $GITHUB_OUTPUT
             echo "SUBJECT_LABEL=Weekly Market Signal Digest" >> $GITHUB_OUTPUT
+          elif [ "$TIMEFRAME" = "both" ]; then
+            echo "OUTPUT_FILE=market-signals.html" >> $GITHUB_OUTPUT
+            echo "SUBJECT_LABEL=Daily + Weekly Market Signal Digest" >> $GITHUB_OUTPUT
           else
             echo "OUTPUT_FILE=market-signals.html" >> $GITHUB_OUTPUT
             echo "SUBJECT_LABEL=Market Signal Digest" >> $GITHUB_OUTPUT
@@ -60,7 +70,7 @@ jobs:
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -verbose
+        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }} -market-digest-weekly-ema-threshold ${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -verbose
 
       - name: Check report
         id: report

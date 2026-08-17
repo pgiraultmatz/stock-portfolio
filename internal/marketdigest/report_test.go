@@ -35,6 +35,12 @@ func TestGenerateReportIncludesBothSections(t *testing.T) {
 			t.Fatalf("expected report to contain %q", expected)
 		}
 	}
+	if !strings.Contains(html, `<span class="ticker">MSFT</span> <span class="muted">- Microsoft</span>`) {
+		t.Fatal("expected compact ticker and name format")
+	}
+	if strings.Contains(html, "Last close") {
+		t.Fatal("did not expect last close column")
+	}
 	if got := strings.Count(html, `<td><span class="ticker">MSFT</span>`); got != 1 {
 		t.Fatalf("expected one ticker row for grouped signals, got %d", got)
 	}
@@ -82,5 +88,33 @@ func TestGenerateReportIncludesTopBullishAndBearish(t *testing.T) {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("expected report to contain %q", expected)
 		}
+	}
+}
+
+func TestGenerateMultiTimeframeReportUsesDailyAndWeeklyColumns(t *testing.T) {
+	stock := models.Stock{Ticker: "MSFT", Name: "Microsoft", Category: "USA"}
+	html := GenerateMultiTimeframeReport(
+		nil,
+		[]technicalalerts.Alert{{
+			Stock: stock, Kind: technicalalerts.EMAReclaim, Label: "EMA50 reclaim",
+			Bias: "bullish", LastClose: 100, Level: 99, DistancePercent: 1,
+		}},
+		nil,
+		[]technicalalerts.Alert{{
+			Stock: stock, Kind: technicalalerts.EMAProximity, Label: "EMA200 touch",
+			Bias: "watch", LastClose: 100, Level: 95, DistancePercent: 5,
+		}},
+		1.5,
+		3.0,
+		map[string]int{"USA": 1},
+	)
+
+	for _, expected := range []string{"Daily signals", "Weekly signals", "EMA50 reclaim", "EMA200 touch", "DAILY + WEEKLY"} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("expected report to contain %q", expected)
+		}
+	}
+	if got := strings.Count(html, `<td><span class="ticker">MSFT</span>`); got != 1 {
+		t.Fatalf("expected one ticker row for multi-timeframe grouped signals, got %d", got)
 	}
 }

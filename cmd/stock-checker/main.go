@@ -84,8 +84,9 @@ func main() {
 	emaThreshold := flag.Float64("ema-threshold", 2.0, "Maximum close distance from EMA, in percent")
 	checkMarketDigest := flag.Bool("check-market-digest", false, "Check end-of-session market signals and write one digest report if any are triggered")
 	marketDigestOutput := flag.String("market-digest-output", "market-signals.html", "Path to write the market signal digest HTML report")
-	marketDigestTimeframe := flag.String("market-digest-timeframe", "daily", "Market signal digest timeframe: daily or weekly")
+	marketDigestTimeframe := flag.String("market-digest-timeframe", "daily", "Market signal digest timeframe: daily, weekly, or both")
 	marketDigestEMAThreshold := flag.Float64("market-digest-ema-threshold", 1.5, "Maximum close distance from EMA for the market digest, in percent")
+	marketDigestWeeklyEMAThreshold := flag.Float64("market-digest-weekly-ema-threshold", 3.0, "Maximum close distance from weekly EMA for the market digest, in percent")
 	flag.Parse()
 
 	// Setup logging
@@ -144,7 +145,7 @@ func main() {
 	}
 
 	if *checkMarketDigest {
-		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, logger); err != nil {
+		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestWeeklyEMAThreshold, logger); err != nil {
 			logger.Error("market digest check failed", "error", err)
 			os.Exit(1)
 		}
@@ -822,7 +823,10 @@ func collectEMAAlerts(ctx context.Context, cfg *config.Config, statePath string,
 	return triggered, nil
 }
 
-func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, logger *slog.Logger) error {
+func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, weeklyEMAThreshold float64, logger *slog.Logger) error {
+	if timeframeValue == "both" {
+		return runMultiTimeframeMarketDigest(ctx, cfg, outputPath, emaThreshold, weeklyEMAThreshold, logger)
+	}
 	divergenceTimeframe, err := divergencealerts.ParseTimeframe(timeframeValue)
 	if err != nil {
 		return err
@@ -848,6 +852,47 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 
 	logger.Info("market signal digest triggered", "timeframe", timeframeValue, "divergences", len(divergences), "technical", len(technical), "ema_threshold", emaThreshold)
 	html := marketdigest.GenerateReportWithCategoryOrder(divergences, technical, timeframeValue, emaThreshold, cfg.GetCategoryOrder())
+	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
+		return fmt.Errorf("writing market signal digest: %w", err)
+	}
+	logger.Info("market signal digest written", "path", outputPath)
+	return nil
+}
+
+func runMultiTimeframeMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, dailyEMAThreshold float64, weeklyEMAThreshold float64, logger *slog.Logger) error {
+	dailyDivergences, err := collectAllDivergenceAlerts(ctx, cfg, divergencealerts.Daily, logger)
+	if err != nil {
+		return err
+	}
+	dailyTechnical, err := collectAllTechnicalAlerts(ctx, cfg, technicalalerts.Daily, dailyEMAThreshold, logger)
+	if err != nil {
+		return err
+	}
+	weeklyDivergences, err := collectAllDivergenceAlerts(ctx, cfg, divergencealerts.Weekly, logger)
+	if err != nil {
+		return err
+	}
+	weeklyTechnical, err := collectAllTechnicalAlerts(ctx, cfg, technicalalerts.Weekly, weeklyEMAThreshold, logger)
+	if err != nil {
+		return err
+	}
+
+	if len(dailyDivergences) == 0 && len(dailyTechnical) == 0 && len(weeklyDivergences) == 0 && len(weeklyTechnical) == 0 {
+		logger.Info("no market signals triggered", "timeframe", "both", "daily_ema_threshold", dailyEMAThreshold, "weekly_ema_threshold", weeklyEMAThreshold)
+		return nil
+	}
+
+	logger.Info(
+		"market signal digest triggered",
+		"timeframe", "both",
+		"daily_divergences", len(dailyDivergences),
+		"daily_technical", len(dailyTechnical),
+		"weekly_divergences", len(weeklyDivergences),
+		"weekly_technical", len(weeklyTechnical),
+		"daily_ema_threshold", dailyEMAThreshold,
+		"weekly_ema_threshold", weeklyEMAThreshold,
+	)
+	html := marketdigest.GenerateMultiTimeframeReport(dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, dailyEMAThreshold, weeklyEMAThreshold, cfg.GetCategoryOrder())
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
 		return fmt.Errorf("writing market signal digest: %w", err)
 	}
