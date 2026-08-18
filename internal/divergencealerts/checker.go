@@ -15,9 +15,11 @@ import (
 )
 
 type Alert struct {
-	Stock      models.Stock
-	Divergence chartcalc.Divergence
-	LastClose  float64
+	Stock         models.Stock
+	Divergence    chartcalc.Divergence
+	LastClose     float64
+	PreviousClose float64
+	ChangePercent float64
 }
 
 type Timeframe string
@@ -104,15 +106,25 @@ func (c *Client) Check(ctx context.Context, stock models.Stock, timeframe Timefr
 	divs = chartcalc.FilterDivergencesByContext(divs, candles, ma50, ma100, ma200, levels)
 
 	last := candles[len(candles)-1]
+	var previousClose float64
+	var changePercent float64
+	if len(candles) >= 2 {
+		previousClose = candles[len(candles)-2].Close
+		if previousClose != 0 {
+			changePercent = ((last.Close - previousClose) / previousClose) * 100
+		}
+	}
 	alerts := make([]Alert, 0, len(divs))
 	for _, div := range divs {
 		if !divergenceOnLatestCandle(div, last.Time) || !divergenceStillActionable(div, last.Close) {
 			continue
 		}
 		alerts = append(alerts, Alert{
-			Stock:      stock,
-			Divergence: div,
-			LastClose:  last.Close,
+			Stock:         stock,
+			Divergence:    div,
+			LastClose:     last.Close,
+			PreviousClose: previousClose,
+			ChangePercent: changePercent,
 		})
 	}
 	return alerts, nil

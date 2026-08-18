@@ -41,7 +41,10 @@ func TestGenerateReportIncludesBothSections(t *testing.T) {
 	if strings.Contains(html, "Last close") {
 		t.Fatal("did not expect last close column")
 	}
-	if got := strings.Count(html, `<td><span class="ticker">MSFT</span>`); got != 1 {
+	if strings.Contains(html, `<li><span class="watch">EMA50 touch</span></li>`) {
+		t.Fatal("expected table signals to be inline, not list items")
+	}
+	if got := strings.Count(html, `<span class="ticker">MSFT</span>`); got != 1 {
 		t.Fatalf("expected one ticker row for grouped signals, got %d", got)
 	}
 }
@@ -97,24 +100,29 @@ func TestGenerateMultiTimeframeReportUsesDailyAndWeeklyColumns(t *testing.T) {
 		nil,
 		[]technicalalerts.Alert{{
 			Stock: stock, Kind: technicalalerts.EMAReclaim, Label: "EMA50 reclaim",
-			Bias: "bullish", LastClose: 100, Level: 99, DistancePercent: 1,
+			Bias: "bullish", LastClose: 100, ChangePercent: 1.25, Level: 99, DistancePercent: 1,
 		}},
 		nil,
 		[]technicalalerts.Alert{{
 			Stock: stock, Kind: technicalalerts.EMAProximity, Label: "EMA200 touch",
-			Bias: "watch", LastClose: 100, Level: 95, DistancePercent: 5,
+			Bias: "watch", LastClose: 100, ChangePercent: -2.5, Level: 95, DistancePercent: 5,
 		}},
 		1.5,
 		3.0,
 		map[string]int{"USA": 1},
 	)
 
-	for _, expected := range []string{"Daily signals", "Weekly signals", "EMA50 reclaim", "EMA200 touch", "DAILY + WEEKLY"} {
+	for _, expected := range []string{"Daily change", "Daily signals", "Weekly change", "Weekly signals", "+1.25%", "-2.50%", "EMA50 reclaim", "EMA200 touch", "DAILY + WEEKLY"} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("expected report to contain %q", expected)
 		}
 	}
-	if got := strings.Count(html, `<td><span class="ticker">MSFT</span>`); got != 1 {
+	for _, expected := range []string{"signal-table", "stock-col", "change-col", "signals-col"} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("expected report to contain column class %q", expected)
+		}
+	}
+	if got := strings.Count(html, `<span class="ticker">MSFT</span>`); got != 1 {
 		t.Fatalf("expected one ticker row for multi-timeframe grouped signals, got %d", got)
 	}
 }

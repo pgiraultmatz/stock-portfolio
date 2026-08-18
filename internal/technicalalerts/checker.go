@@ -83,6 +83,8 @@ type Alert struct {
 	Period          int
 	CandleTime      int64
 	LastClose       float64
+	PreviousClose   float64
+	ChangePercent   float64
 	LastLow         float64
 	LastHigh        float64
 	Level           float64
@@ -132,6 +134,10 @@ func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.C
 	}
 	last := candles[len(candles)-1]
 	prev := candles[len(candles)-2]
+	changePercent := 0.0
+	if prev.Close != 0 {
+		changePercent = ((last.Close - prev.Close) / prev.Close) * 100
+	}
 	var alerts []Alert
 
 	emaLines := make(map[int][]float64)
@@ -152,10 +158,10 @@ func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.C
 			hasCross = false
 		} else if prev.Close <= previous && last.Close > latest {
 			hasCross = true
-			alerts = append(alerts, emaCrossAlert(stock, timeframe, last, period, EMAReclaim, "bullish", latest, distancePercent, previous))
+			alerts = append(alerts, emaCrossAlert(stock, timeframe, last, prev.Close, changePercent, period, EMAReclaim, "bullish", latest, distancePercent, previous))
 		} else if prev.Close >= previous && last.Close < latest {
 			hasCross = true
-			alerts = append(alerts, emaCrossAlert(stock, timeframe, last, period, EMALoss, "bearish", latest, distancePercent, previous))
+			alerts = append(alerts, emaCrossAlert(stock, timeframe, last, prev.Close, changePercent, period, EMALoss, "bearish", latest, distancePercent, previous))
 		}
 
 		if !hasCross && (touched || near) {
@@ -165,8 +171,8 @@ func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.C
 			}
 			alerts = append(alerts, Alert{
 				Stock: stock, Timeframe: timeframe, Kind: EMAProximity, Label: fmt.Sprintf("EMA%d %s", period, status),
-				Bias: "watch", Period: period, CandleTime: last.Time, LastClose: last.Close, LastLow: last.Low,
-				LastHigh: last.High, Level: latest, DistancePercent: distancePercent,
+				Bias: "watch", Period: period, CandleTime: last.Time, LastClose: last.Close, PreviousClose: prev.Close,
+				ChangePercent: changePercent, LastLow: last.Low, LastHigh: last.High, Level: latest, DistancePercent: distancePercent,
 				Detail: fmt.Sprintf("Close is %+.2f%% from EMA%d.", distancePercent, period),
 			})
 		}
@@ -178,7 +184,7 @@ func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.C
 	return alerts
 }
 
-func emaCrossAlert(stock models.Stock, timeframe Timeframe, last chartcalc.Candle, period int, kind Kind, bias string, level float64, distancePercent float64, previousValue float64) Alert {
+func emaCrossAlert(stock models.Stock, timeframe Timeframe, last chartcalc.Candle, previousClose float64, changePercent float64, period int, kind Kind, bias string, level float64, distancePercent float64, previousValue float64) Alert {
 	action := "reclaimed"
 	labelKind := "reclaim"
 	if kind == EMALoss {
@@ -187,7 +193,8 @@ func emaCrossAlert(stock models.Stock, timeframe Timeframe, last chartcalc.Candl
 	}
 	return Alert{
 		Stock: stock, Timeframe: timeframe, Kind: kind, Label: fmt.Sprintf("EMA%d %s", period, labelKind),
-		Bias: bias, Period: period, CandleTime: last.Time, LastClose: last.Close, Level: level,
+		Bias: bias, Period: period, CandleTime: last.Time, LastClose: last.Close, PreviousClose: previousClose,
+		ChangePercent: changePercent, Level: level,
 		DistancePercent: distancePercent, PreviousValue: previousValue, CurrentValue: level,
 		Detail: fmt.Sprintf("Close %s EMA%d after previously closing on the other side.", action, period),
 	}
@@ -205,17 +212,24 @@ func rsiRegimeAlerts(stock models.Stock, timeframe Timeframe, candles []chartcal
 	prev := rsi[len(rsi)-2]
 	last := rsi[len(rsi)-1]
 	candle := candles[len(candles)-1]
+	previousClose := candles[len(candles)-2].Close
+	changePercent := 0.0
+	if previousClose != 0 {
+		changePercent = ((candle.Close - previousClose) / previousClose) * 100
+	}
 	if prev.Value < 50 && last.Value >= 50 {
 		return []Alert{{
 			Stock: stock, Timeframe: timeframe, Kind: RSIRegimeUp, Label: "RSI reclaimed 50",
-			Bias: "bullish", CandleTime: candle.Time, LastClose: candle.Close, PreviousValue: prev.Value,
+			Bias: "bullish", CandleTime: candle.Time, LastClose: candle.Close, PreviousClose: previousClose,
+			ChangePercent: changePercent, PreviousValue: prev.Value,
 			CurrentValue: last.Value, Level: 50, Detail: "RSI moved back above the 50 momentum line.",
 		}}
 	}
 	if prev.Value > 50 && last.Value <= 50 {
 		return []Alert{{
 			Stock: stock, Timeframe: timeframe, Kind: RSIRegimeDn, Label: "RSI lost 50",
-			Bias: "bearish", CandleTime: candle.Time, LastClose: candle.Close, PreviousValue: prev.Value,
+			Bias: "bearish", CandleTime: candle.Time, LastClose: candle.Close, PreviousClose: previousClose,
+			ChangePercent: changePercent, PreviousValue: prev.Value,
 			CurrentValue: last.Value, Level: 50, Detail: "RSI moved below the 50 momentum line.",
 		}}
 	}
@@ -228,6 +242,11 @@ func breakoutAlerts(stock models.Stock, timeframe Timeframe, candles []chartcalc
 		return nil
 	}
 	last := candles[len(candles)-1]
+	prev := candles[len(candles)-2]
+	changePercent := 0.0
+	if prev.Close != 0 {
+		changePercent = ((last.Close - prev.Close) / prev.Close) * 100
+	}
 	window := candles[len(candles)-1-lookback : len(candles)-1]
 	high := window[0].High
 	low := window[0].Low
@@ -238,14 +257,16 @@ func breakoutAlerts(stock models.Stock, timeframe Timeframe, candles []chartcalc
 	if last.Close > high {
 		return []Alert{{
 			Stock: stock, Timeframe: timeframe, Kind: Breakout, Label: fmt.Sprintf("%d-candle breakout", lookback),
-			Bias: "bullish", Period: lookback, CandleTime: last.Time, LastClose: last.Close, Level: high,
+			Bias: "bullish", Period: lookback, CandleTime: last.Time, LastClose: last.Close, PreviousClose: prev.Close,
+			ChangePercent: changePercent, Level: high,
 			DistancePercent: ((last.Close - high) / high) * 100, Detail: "Close broke above the recent high range.",
 		}}
 	}
 	if last.Close < low {
 		return []Alert{{
 			Stock: stock, Timeframe: timeframe, Kind: Breakdown, Label: fmt.Sprintf("%d-candle breakdown", lookback),
-			Bias: "bearish", Period: lookback, CandleTime: last.Time, LastClose: last.Close, Level: low,
+			Bias: "bearish", Period: lookback, CandleTime: last.Time, LastClose: last.Close, PreviousClose: prev.Close,
+			ChangePercent: changePercent, Level: low,
 			DistancePercent: ((last.Close - low) / low) * 100, Detail: "Close broke below the recent low range.",
 		}}
 	}
@@ -260,6 +281,11 @@ func macdCrossAlerts(stock models.Stock, timeframe Timeframe, candles []chartcal
 	prev := macd[len(macd)-2]
 	last := macd[len(macd)-1]
 	candle := candles[len(candles)-1]
+	prevCandle := candles[len(candles)-2]
+	changePercent := 0.0
+	if prevCandle.Close != 0 {
+		changePercent = ((candle.Close - prevCandle.Close) / prevCandle.Close) * 100
+	}
 	lastEMA50 := ema50[len(ema50)-1]
 	if math.IsNaN(lastEMA50) {
 		return nil
@@ -267,7 +293,8 @@ func macdCrossAlerts(stock models.Stock, timeframe Timeframe, candles []chartcal
 	if prev.MACD <= prev.Signal && last.MACD > last.Signal && candle.Close >= lastEMA50 {
 		return []Alert{{
 			Stock: stock, Timeframe: timeframe, Kind: MACDBullish, Label: "MACD bullish cross",
-			Bias: "bullish", CandleTime: candle.Time, LastClose: candle.Close, Level: lastEMA50,
+			Bias: "bullish", CandleTime: candle.Time, LastClose: candle.Close, PreviousClose: prevCandle.Close,
+			ChangePercent: changePercent, Level: lastEMA50,
 			PreviousValue: prev.MACD - prev.Signal, CurrentValue: last.MACD - last.Signal,
 			Detail: "MACD crossed above signal while price is above EMA50.",
 		}}
@@ -275,7 +302,8 @@ func macdCrossAlerts(stock models.Stock, timeframe Timeframe, candles []chartcal
 	if prev.MACD >= prev.Signal && last.MACD < last.Signal && candle.Close <= lastEMA50 {
 		return []Alert{{
 			Stock: stock, Timeframe: timeframe, Kind: MACDBearish, Label: "MACD bearish cross",
-			Bias: "bearish", CandleTime: candle.Time, LastClose: candle.Close, Level: lastEMA50,
+			Bias: "bearish", CandleTime: candle.Time, LastClose: candle.Close, PreviousClose: prevCandle.Close,
+			ChangePercent: changePercent, Level: lastEMA50,
 			PreviousValue: prev.MACD - prev.Signal, CurrentValue: last.MACD - last.Signal,
 			Detail: "MACD crossed below signal while price is below EMA50.",
 		}}

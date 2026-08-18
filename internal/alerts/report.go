@@ -68,7 +68,7 @@ func GenerateReport(alerts []Alert) string {
 <body>
 `)
 
-	sb.WriteString(fmt.Sprintf("<h2>🚨 Price Alerts — %s</h2>\n", time.Now().Format("02/01/2006")))
+	sb.WriteString(fmt.Sprintf("<h2>Price Alerts — %s</h2>\n", time.Now().Format("02/01/2006")))
 	sb.WriteString("<table>\n")
 	sb.WriteString("  <tr><th>Stock</th><th>Ticker</th><th>Category</th><th>Open</th><th>Current</th><th>Change</th></tr>\n")
 
@@ -119,5 +119,5 @@ func EmailSubject(alerts []Alert) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s %s%.1f%%", a.Stock.Ticker, sign, a.ChangePercent))
 	}
-	return fmt.Sprintf("🚨 Price Alert: %s", strings.Join(parts, ", "))
+	return fmt.Sprintf("Price Alert: %s", strings.Join(parts, ", "))
 }

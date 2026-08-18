@@ -54,13 +54,10 @@ jobs:
           echo "WEEKLY_EMA_THRESHOLD=$WEEKLY_EMA_THRESHOLD" >> $GITHUB_OUTPUT
           if [ "$TIMEFRAME" = "weekly" ]; then
             echo "OUTPUT_FILE=market-signals-weekly.html" >> $GITHUB_OUTPUT
-            echo "SUBJECT_LABEL=Weekly Market Signal Digest" >> $GITHUB_OUTPUT
           elif [ "$TIMEFRAME" = "both" ]; then
             echo "OUTPUT_FILE=market-signals.html" >> $GITHUB_OUTPUT
-            echo "SUBJECT_LABEL=Daily + Weekly Market Signal Digest" >> $GITHUB_OUTPUT
           else
             echo "OUTPUT_FILE=market-signals.html" >> $GITHUB_OUTPUT
-            echo "SUBJECT_LABEL=Market Signal Digest" >> $GITHUB_OUTPUT
           fi
 
       - name: Build application
@@ -89,7 +86,7 @@ jobs:
           server_port: 465
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "${{ steps.meta.outputs.SUBJECT_LABEL }} — ${{ steps.meta.outputs.TODAY }}"
+          subject: "Market Signal Digest — ${{ steps.meta.outputs.TODAY }}"
           html_body: file://${{ steps.meta.outputs.OUTPUT_FILE }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>

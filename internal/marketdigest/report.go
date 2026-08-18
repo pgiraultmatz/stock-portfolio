@@ -25,12 +25,16 @@ type timeframeSignals struct {
 }
 
 type multiTickerGroup struct {
-	Ticker    string
-	Name      string
-	Category  string
-	LastClose float64
-	Daily     timeframeSignals
-	Weekly    timeframeSignals
+	Ticker          string
+	Name            string
+	Category        string
+	LastClose       float64
+	Daily           timeframeSignals
+	Weekly          timeframeSignals
+	DailyChange     float64
+	HasDailyChange  bool
+	WeeklyChange    float64
+	HasWeeklyChange bool
 }
 
 type topPick struct {
@@ -98,9 +102,15 @@ func writeHeader(sb *strings.Builder) {
   h3 { margin-top: 26px; margin-bottom: 10px; color: #24303d; }
   .cat-count { color:#777; font-size:12px; font-weight: normal; }
   table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+  .signal-table { table-layout: fixed; }
   th { background: #17202a; color: white; padding: 10px 12px; text-align: left; font-size: 13px; }
-  td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: top; }
+  td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: top; overflow-wrap: anywhere; word-break: normal; }
   tr:last-child td { border-bottom: none; }
+  .stock-col { width: 36%; }
+  .change-col { width: 9%; }
+  .signals-col { width: 23%; }
+  .single-stock-col { width: 36%; }
+  .single-signals-col { width: 64%; }
   .ticker { font-weight: bold; white-space: nowrap; }
   .category, .muted { color:#777; font-size:12px; }
   .number { text-align: right; white-space: nowrap; }
@@ -186,6 +196,8 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
 		g.Daily.Divergences = append(g.Daily.Divergences, alert)
 		g.LastClose = alert.LastClose
+		g.DailyChange = alert.ChangePercent
+		g.HasDailyChange = true
 	}
 	for _, alert := range dailyTechnical {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
@@ -193,6 +205,8 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 		if alert.LastClose > 0 {
 			g.LastClose = alert.LastClose
 		}
+		g.DailyChange = alert.ChangePercent
+		g.HasDailyChange = true
 	}
 	for _, alert := range weeklyDivergences {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
@@ -200,6 +214,8 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 		if g.LastClose == 0 {
 			g.LastClose = alert.LastClose
 		}
+		g.WeeklyChange = alert.ChangePercent
+		g.HasWeeklyChange = true
 	}
 	for _, alert := range weeklyTechnical {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
@@ -207,6 +223,8 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 		if g.LastClose == 0 && alert.LastClose > 0 {
 			g.LastClose = alert.LastClose
 		}
+		g.WeeklyChange = alert.ChangePercent
+		g.HasWeeklyChange = true
 	}
 	groups := make([]multiTickerGroup, 0, len(byTicker))
 	for _, g := range byTicker {
@@ -451,14 +469,14 @@ func writeTopList(sb *strings.Builder, picks []topPick, className string) {
 
 func writeCategorySection(sb *strings.Builder, category categoryGroup) {
 	sb.WriteString(fmt.Sprintf("<h3>%s <span class=\"cat-count\">%d tickers</span></h3>\n", category.Name, len(category.Tickers)))
-	sb.WriteString("<table>\n")
-	sb.WriteString("  <tr><th>Stock</th><th>Signals</th></tr>\n")
+	sb.WriteString("<table class=\"signal-table\">\n")
+	sb.WriteString("  <tr><th class=\"single-stock-col\">Stock</th><th class=\"single-signals-col\">Signals</th></tr>\n")
 	for _, group := range category.Tickers {
 		signals := formatSignals(group)
 		sb.WriteString(fmt.Sprintf(
 			`  <tr>
-    <td><span class="ticker">%s</span> <span class="muted">- %s</span></td>
-    <td>%s</td>
+    <td class="single-stock-col"><span class="ticker">%s</span> <span class="muted">- %s</span></td>
+    <td class="single-signals-col">%s</td>
   </tr>
 `,
 			group.Ticker,
@@ -471,21 +489,25 @@ func writeCategorySection(sb *strings.Builder, category categoryGroup) {
 
 func writeCategorySectionMulti(sb *strings.Builder, category multiCategoryGroup) {
 	sb.WriteString(fmt.Sprintf("<h3>%s <span class=\"cat-count\">%d tickers</span></h3>\n", category.Name, len(category.Tickers)))
-	sb.WriteString("<table>\n")
-	sb.WriteString("  <tr><th>Stock</th><th>Daily signals</th><th>Weekly signals</th></tr>\n")
+	sb.WriteString("<table class=\"signal-table\">\n")
+	sb.WriteString("  <tr><th class=\"stock-col\">Stock</th><th class=\"change-col\">Daily change</th><th class=\"signals-col\">Daily signals</th><th class=\"change-col\">Weekly change</th><th class=\"signals-col\">Weekly signals</th></tr>\n")
 	for _, group := range category.Tickers {
 		daily := formatTimeframeSignals(group.Daily)
 		weekly := formatTimeframeSignals(group.Weekly)
 		sb.WriteString(fmt.Sprintf(
 			`  <tr>
-    <td><span class="ticker">%s</span> <span class="muted">- %s</span></td>
-    <td>%s</td>
-    <td>%s</td>
+    <td class="stock-col"><span class="ticker">%s</span> <span class="muted">- %s</span></td>
+    <td class="number change-col">%s</td>
+    <td class="signals-col">%s</td>
+    <td class="number change-col">%s</td>
+    <td class="signals-col">%s</td>
   </tr>
 `,
 			group.Ticker,
 			group.Name,
+			formatChange(group.DailyChange, group.HasDailyChange),
 			daily,
+			formatChange(group.WeeklyChange, group.HasWeeklyChange),
 			weekly,
 		))
 	}
@@ -500,12 +522,11 @@ func formatSignals(group tickerGroup) string {
 	if len(group.Divergences) == 0 && len(group.Technical) == 0 {
 		return `<span class="empty">-</span>`
 	}
-	var sb strings.Builder
-	sb.WriteString(`<ul class="signal-list">`)
+	parts := make([]string, 0, len(group.Divergences)+len(group.Technical))
 	for _, alert := range group.Divergences {
 		div := alert.Divergence
-		sb.WriteString(fmt.Sprintf(
-			`<li><span class="%s">%s RSI divergence</span> <span class="muted">%s → %s</span></li>`,
+		parts = append(parts, fmt.Sprintf(
+			`<span class="%s">%s RSI divergence</span> <span class="muted">%s → %s</span>`,
 			div.Kind,
 			strings.ToUpper(div.Kind),
 			formatDate(div.FromTime),
@@ -517,14 +538,24 @@ func formatSignals(group tickerGroup) string {
 		if biasClass == "" {
 			biasClass = "neutral"
 		}
-		sb.WriteString(fmt.Sprintf(
-			`<li><span class="%s">%s</span></li>`,
+		parts = append(parts, fmt.Sprintf(
+			`<span class="%s">%s</span>`,
 			biasClass,
 			alert.Label,
 		))
 	}
-	sb.WriteString(`</ul>`)
-	return sb.String()
+	return strings.Join(parts, ` <span class="muted">·</span> `)
+}
+
+func formatChange(value float64, ok bool) string {
+	if !ok {
+		return `<span class="empty">-</span>`
+	}
+	className := "above"
+	if value < 0 {
+		className = "below"
+	}
+	return fmt.Sprintf(`<span class="%s">%+.2f%%</span>`, className, value)
 }
 
 func signalRank(kind technicalalerts.Kind) int {
