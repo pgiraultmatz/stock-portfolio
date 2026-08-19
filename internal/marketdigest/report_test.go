@@ -96,7 +96,7 @@ func TestGenerateReportIncludesTopBullishAndBearish(t *testing.T) {
 
 func TestGenerateMultiTimeframeReportUsesDailyAndWeeklyColumns(t *testing.T) {
 	stock := models.Stock{Ticker: "MSFT", Name: "Microsoft", Category: "USA"}
-	html := GenerateMultiTimeframeReport(
+	html := GenerateMultiTimeframeReportWithChanges(
 		nil,
 		[]technicalalerts.Alert{{
 			Stock: stock, Kind: technicalalerts.EMAReclaim, Label: "EMA50 reclaim",
@@ -110,14 +110,17 @@ func TestGenerateMultiTimeframeReportUsesDailyAndWeeklyColumns(t *testing.T) {
 		1.5,
 		3.0,
 		map[string]int{"USA": 1},
+		map[string]ChangeSummary{
+			"MSFT": {DailyChange: 0.75, HasDailyChange: true, WeeklyChange: 4.25, HasWeeklyChange: true},
+		},
 	)
 
-	for _, expected := range []string{"Daily change", "Daily signals", "Weekly change", "Weekly signals", "+1.25%", "-2.50%", "EMA50 reclaim", "EMA200 touch", "DAILY + WEEKLY"} {
+	for _, expected := range []string{"Market Signal Digest -", "Daily", "Weekly", "+0.75%", "+4.25%", "EMA50 reclaim", "EMA200 touch"} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("expected report to contain %q", expected)
 		}
 	}
-	for _, expected := range []string{"signal-table", "stock-col", "change-col", "signals-col"} {
+	for _, expected := range []string{"signal-table", "stock-col", "period-col"} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("expected report to contain column class %q", expected)
 		}

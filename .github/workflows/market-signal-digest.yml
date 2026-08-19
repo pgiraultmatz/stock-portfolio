@@ -86,7 +86,7 @@ jobs:
           server_port: 465
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "Market Signal Digest — ${{ steps.meta.outputs.TODAY }}"
+          subject: "Market Signal Digest - ${{ steps.meta.outputs.TODAY }}"
           html_body: file://${{ steps.meta.outputs.OUTPUT_FILE }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>

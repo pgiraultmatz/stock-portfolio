@@ -63,6 +63,25 @@ func TestWeeklyStateScope(t *testing.T) {
 	}
 }
 
+func TestCalcDailyAndWeeklyChangesUsesFiveSessions(t *testing.T) {
+	candles := []chartcalc.Candle{
+		{Close: 100},
+		{Close: 102},
+		{Close: 104},
+		{Close: 106},
+		{Close: 108},
+		{Close: 110},
+	}
+
+	change := CalcDailyAndWeeklyChanges(candles)
+	if !change.HasDailyChange || change.DailyChange < 1.85 || change.DailyChange > 1.86 {
+		t.Fatalf("unexpected daily change: %+v", change)
+	}
+	if !change.HasWeeklyChange || change.WeeklyChange != 10 {
+		t.Fatalf("expected weekly change from five sessions ago, got %+v", change)
+	}
+}
+
 func TestMACDCrossFilteredByEMA50(t *testing.T) {
 	candles := risingCandles(80, 100, 0.2)
 	for i := 72; i < 79; i++ {

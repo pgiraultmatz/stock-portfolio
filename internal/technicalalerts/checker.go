@@ -94,6 +94,13 @@ type Alert struct {
 	Detail          string
 }
 
+type ChangeSummary struct {
+	DailyChange     float64
+	HasDailyChange  bool
+	WeeklyChange    float64
+	HasWeeklyChange bool
+}
+
 type Client struct {
 	baseURL    string
 	userAgent  string
@@ -126,6 +133,35 @@ func (c *Client) Check(ctx context.Context, stock models.Stock, timeframe Timefr
 		return nil, err
 	}
 	return CheckCandles(stock, timeframe, candles, emaThresholdPercent), nil
+}
+
+func (c *Client) DailyAndWeeklyChanges(ctx context.Context, ticker string) (ChangeSummary, error) {
+	candles, err := c.fetchCandles(ctx, ticker, Daily)
+	if err != nil {
+		return ChangeSummary{}, err
+	}
+	return CalcDailyAndWeeklyChanges(candles), nil
+}
+
+func CalcDailyAndWeeklyChanges(candles []chartcalc.Candle) ChangeSummary {
+	if len(candles) < 2 {
+		return ChangeSummary{}
+	}
+	last := candles[len(candles)-1]
+	prev := candles[len(candles)-2]
+	out := ChangeSummary{}
+	if prev.Close != 0 {
+		out.DailyChange = ((last.Close - prev.Close) / prev.Close) * 100
+		out.HasDailyChange = true
+	}
+	if len(candles) >= 6 {
+		weekAgo := candles[len(candles)-6]
+		if weekAgo.Close != 0 {
+			out.WeeklyChange = ((last.Close - weekAgo.Close) / weekAgo.Close) * 100
+			out.HasWeeklyChange = true
+		}
+	}
+	return out
 }
 
 func CheckCandles(stock models.Stock, timeframe Timeframe, candles []chartcalc.Candle, emaThresholdPercent float64) []Alert {

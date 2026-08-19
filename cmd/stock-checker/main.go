@@ -881,6 +881,7 @@ func runMultiTimeframeMarketDigest(ctx context.Context, cfg *config.Config, outp
 		logger.Info("no market signals triggered", "timeframe", "both", "daily_ema_threshold", dailyEMAThreshold, "weekly_ema_threshold", weeklyEMAThreshold)
 		return nil
 	}
+	changes := collectDigestChanges(ctx, cfg, dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, logger)
 
 	logger.Info(
 		"market signal digest triggered",
@@ -892,12 +893,45 @@ func runMultiTimeframeMarketDigest(ctx context.Context, cfg *config.Config, outp
 		"daily_ema_threshold", dailyEMAThreshold,
 		"weekly_ema_threshold", weeklyEMAThreshold,
 	)
-	html := marketdigest.GenerateMultiTimeframeReport(dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, dailyEMAThreshold, weeklyEMAThreshold, cfg.GetCategoryOrder())
+	html := marketdigest.GenerateMultiTimeframeReportWithChanges(dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, dailyEMAThreshold, weeklyEMAThreshold, cfg.GetCategoryOrder(), changes)
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
 		return fmt.Errorf("writing market signal digest: %w", err)
 	}
 	logger.Info("market signal digest written", "path", outputPath)
 	return nil
+}
+
+func collectDigestChanges(ctx context.Context, cfg *config.Config, dailyDivergences []divergencealerts.Alert, dailyTechnical []technicalalerts.Alert, weeklyDivergences []divergencealerts.Alert, weeklyTechnical []technicalalerts.Alert, logger *slog.Logger) map[string]marketdigest.ChangeSummary {
+	tickers := make(map[string]bool)
+	for _, alert := range dailyDivergences {
+		tickers[alert.Stock.Ticker] = true
+	}
+	for _, alert := range dailyTechnical {
+		tickers[alert.Stock.Ticker] = true
+	}
+	for _, alert := range weeklyDivergences {
+		tickers[alert.Stock.Ticker] = true
+	}
+	for _, alert := range weeklyTechnical {
+		tickers[alert.Stock.Ticker] = true
+	}
+
+	client := technicalalerts.NewClient(cfg.YahooAPI)
+	changes := make(map[string]marketdigest.ChangeSummary, len(tickers))
+	for ticker := range tickers {
+		change, err := client.DailyAndWeeklyChanges(ctx, ticker)
+		if err != nil {
+			logger.Warn("failed to fetch digest changes", "ticker", ticker, "error", err)
+			continue
+		}
+		changes[ticker] = marketdigest.ChangeSummary{
+			DailyChange:     change.DailyChange,
+			HasDailyChange:  change.HasDailyChange,
+			WeeklyChange:    change.WeeklyChange,
+			HasWeeklyChange: change.HasWeeklyChange,
+		}
+	}
+	return changes
 }
 
 func collectTechnicalAlerts(ctx context.Context, cfg *config.Config, statePath string, timeframe technicalalerts.Timeframe, emaThresholdPercent float64, logger *slog.Logger) ([]technicalalerts.Alert, error) {
