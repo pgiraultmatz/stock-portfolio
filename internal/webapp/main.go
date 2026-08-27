@@ -922,7 +922,12 @@ func chartFetchRange(displayRange, interval string) string {
 	if interval == "1wk" {
 		switch displayRange {
 		case "1mo", "3mo", "6mo", "1y", "2y":
+			if displayRange == "2y" {
+				return "10y"
+			}
 			return "5y"
+		case "5y":
+			return "10y"
 		default:
 			return displayRange
 		}
@@ -1054,8 +1059,22 @@ func trimChartResponse(cr ChartResponse, displayRange, interval, maMode string) 
 		return candles[idx:]
 	}
 	filterLine := func(points []ChartLinePoint) []ChartLinePoint {
-		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
-		return points[idx:]
+		if len(cr.Candles) == 0 {
+			return nil
+		}
+		firstVisibleTime := cr.Candles[0].Time
+		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= firstVisibleTime })
+		filtered := points[idx:]
+		if len(filtered) > 0 && filtered[0].Time == firstVisibleTime {
+			return filtered
+		}
+		value, ok := chartLineValueAtOrBefore(points, firstVisibleTime)
+		if !ok {
+			return filtered
+		}
+		seeded := make([]ChartLinePoint, 0, len(filtered)+1)
+		seeded = append(seeded, ChartLinePoint{Time: firstVisibleTime, Value: value})
+		return append(seeded, filtered...)
 	}
 	filterMACD := func(points []ChartMACDPoint) []ChartMACDPoint {
 		idx := sort.Search(len(points), func(i int) bool { return points[i].Time >= cutoff })
@@ -1436,46 +1455,51 @@ func calcMACD(candles []ChartCandle) []ChartMACDPoint {
 	const fast = 12
 	const slow = 26
 	const signalPeriod = 9
-	if len(candles) < slow+signalPeriod-1 {
+	if len(candles) == 0 {
 		return nil
 	}
-	emaFast := calcEMA(candles, fast)
-	emaSlow := calcEMA(candles, slow)
+	emaFast := calcSeededEMA(candles, fast)
+	emaSlow := calcSeededEMA(candles, slow)
 
 	type macdBase struct {
 		time  int64
 		value float64
 	}
-	var base []macdBase
+	base := make([]macdBase, 0, len(candles))
 	for i := range candles {
-		if math.IsNaN(emaFast[i]) || math.IsNaN(emaSlow[i]) {
-			continue
-		}
 		base = append(base, macdBase{time: candles[i].Time, value: emaFast[i] - emaSlow[i]})
 	}
-	if len(base) < signalPeriod {
-		return nil
-	}
 
-	var sum float64
-	for i := 0; i < signalPeriod; i++ {
-		sum += base[i].value
-	}
-	signal := sum / signalPeriod
-	points := make([]ChartMACDPoint, 0, len(base)-signalPeriod+1)
-	for i := signalPeriod - 1; i < len(base); i++ {
-		if i > signalPeriod-1 {
-			k := 2.0 / float64(signalPeriod+1)
-			signal = base[i].value*k + signal*(1-k)
+	points := make([]ChartMACDPoint, 0, len(base))
+	signal := base[0].value
+	k := 2.0 / float64(signalPeriod+1)
+	for i, point := range base {
+		if i > 0 {
+			signal = point.value*k + signal*(1-k)
 		}
 		points = append(points, ChartMACDPoint{
-			Time:      base[i].time,
-			MACD:      base[i].value,
+			Time:      point.time,
+			MACD:      point.value,
 			Signal:    signal,
-			Histogram: base[i].value - signal,
+			Histogram: point.value - signal,
 		})
 	}
 	return points
+}
+
+func calcSeededEMA(candles []ChartCandle, period int) []float64 {
+	values := make([]float64, len(candles))
+	if period <= 0 || len(candles) == 0 {
+		return values
+	}
+	ema := candles[0].Close
+	values[0] = ema
+	k := 2.0 / float64(period+1)
+	for i := 1; i < len(candles); i++ {
+		ema = candles[i].Close*k + ema*(1-k)
+		values[i] = ema
+	}
+	return values
 }
 
 func calcEMA(candles []ChartCandle, period int) []float64 {
@@ -1501,12 +1525,17 @@ func calcEMA(candles []ChartCandle, period int) []float64 {
 }
 
 func calcEMALine(candles []ChartCandle, period int) []ChartLinePoint {
-	values := calcEMA(candles, period)
-	points := make([]ChartLinePoint, 0, len(values))
-	for i, value := range values {
-		if !math.IsNaN(value) {
-			points = append(points, ChartLinePoint{Time: candles[i].Time, Value: value})
+	if period <= 0 || len(candles) == 0 {
+		return nil
+	}
+	points := make([]ChartLinePoint, 0, len(candles))
+	ema := candles[0].Close
+	k := 2.0 / float64(period+1)
+	for i, candle := range candles {
+		if i > 0 {
+			ema = candle.Close*k + ema*(1-k)
 		}
+		points = append(points, ChartLinePoint{Time: candle.Time, Value: ema})
 	}
 	return points
 }

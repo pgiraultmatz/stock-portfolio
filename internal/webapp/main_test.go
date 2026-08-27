@@ -55,6 +55,147 @@ func TestTrimChartResponseKeepsEMA200WarmedFromFullHistory(t *testing.T) {
 	}
 }
 
+func TestChartFetchRangeWarmsWeeklyEMA200(t *testing.T) {
+	if got := chartFetchRange("2y", "1wk"); got != "10y" {
+		t.Fatalf("expected 10y fetch range for 2y weekly chart, got %q", got)
+	}
+	if got := chartFetchRange("5y", "1wk"); got != "10y" {
+		t.Fatalf("expected 10y fetch range for 5y weekly chart, got %q", got)
+	}
+}
+
+func TestTrimWeeklyChartResponseKeepsEMA200WarmedFromFullHistory(t *testing.T) {
+	candles := make([]ChartCandle, 0, 520)
+	start := time.Date(2016, time.May, 20, 21, 0, 0, 0, time.UTC)
+	for i := 0; i < 520; i++ {
+		close := 100 + float64(i)*0.35 + math.Sin(float64(i)/6)*5
+		candles = append(candles, ChartCandle{
+			Time:   start.AddDate(0, 0, i*7).Unix(),
+			Open:   close - 0.7,
+			High:   close + 1.4,
+			Low:    close - 1.6,
+			Close:  close,
+			Volume: int64(1_000_000 + i*1000),
+		})
+	}
+
+	fullEMA200 := calcEMALine(candles, 200)
+	trimmed := trimChartResponse(ChartResponse{
+		Symbol:   "TEST",
+		Range:    "10y",
+		Interval: "1wk",
+		Candles:  candles,
+	}, "2y", "1wk", "ema")
+
+	if len(trimmed.Candles) == 0 {
+		t.Fatal("expected visible candles after trim")
+	}
+	if len(trimmed.EMA200) == 0 {
+		t.Fatal("expected EMA200 after trim")
+	}
+
+	firstVisibleTime := trimmed.Candles[0].Time
+	if trimmed.EMA200[0].Time != firstVisibleTime {
+		t.Fatalf("EMA200 should be warmed before trim: first EMA time %d, first visible candle time %d", trimmed.EMA200[0].Time, firstVisibleTime)
+	}
+
+	expected, ok := chartLineValueAtOrBefore(fullEMA200, firstVisibleTime)
+	if !ok {
+		t.Fatal("expected full-history EMA200 at first visible candle")
+	}
+	if math.Abs(trimmed.EMA200[0].Value-expected) > 0.000001 {
+		t.Fatalf("EMA200 should match full-history value: got %.8f want %.8f", trimmed.EMA200[0].Value, expected)
+	}
+}
+
+func TestTrimChartResponseSeedsMovingAverageAtFirstVisibleCandle(t *testing.T) {
+	start := time.Date(2026, time.July, 12, 21, 0, 0, 0, time.UTC)
+	candles := make([]ChartCandle, 0, 8)
+	for i := 0; i < 8; i++ {
+		close := 100 + float64(i)
+		candles = append(candles, ChartCandle{
+			Time:   start.AddDate(0, 0, i*7).Unix(),
+			Open:   close - 1,
+			High:   close + 1,
+			Low:    close - 2,
+			Close:  close,
+			Volume: 1_000_000,
+		})
+	}
+
+	trimmed := trimChartResponse(ChartResponse{
+		Symbol:   "TEST",
+		Range:    "5y",
+		Interval: "1wk",
+		Candles:  candles,
+		EMA50: []ChartLinePoint{
+			{Time: candles[1].Time, Value: 101.5},
+			{Time: candles[4].Time, Value: 104.5},
+		},
+	}, "1mo", "1wk", "ema")
+
+	if len(trimmed.Candles) == 0 {
+		t.Fatal("expected visible candles after trim")
+	}
+	if len(trimmed.EMA50) == 0 {
+		t.Fatal("expected EMA50 after trim")
+	}
+	if trimmed.EMA50[0].Time != trimmed.Candles[0].Time {
+		t.Fatalf("expected EMA50 to start at first visible candle: got %d want %d", trimmed.EMA50[0].Time, trimmed.Candles[0].Time)
+	}
+	if trimmed.EMA50[0].Value != 101.5 {
+		t.Fatalf("expected seeded EMA50 value from previous point, got %.2f", trimmed.EMA50[0].Value)
+	}
+}
+
+func TestChartEMALineStartsBeforeFullPeriod(t *testing.T) {
+	candles := make([]ChartCandle, 0, 20)
+	start := time.Date(2026, time.January, 1, 21, 0, 0, 0, time.UTC)
+	for i := 0; i < 20; i++ {
+		close := 50 + float64(i)
+		candles = append(candles, ChartCandle{
+			Time:   start.AddDate(0, 0, i*7).Unix(),
+			Open:   close - 1,
+			High:   close + 1,
+			Low:    close - 2,
+			Close:  close,
+			Volume: 1_000_000,
+		})
+	}
+
+	ema200 := calcEMALine(candles, 200)
+	if len(ema200) != len(candles) {
+		t.Fatalf("expected EMA200 chart line to start before 200 candles: got %d points for %d candles", len(ema200), len(candles))
+	}
+	if ema200[0].Time != candles[0].Time || ema200[0].Value != candles[0].Close {
+		t.Fatalf("expected EMA200 to be seeded from first close, got %+v", ema200[0])
+	}
+}
+
+func TestChartMACDStartsBeforeFullWarmup(t *testing.T) {
+	candles := make([]ChartCandle, 0, 20)
+	start := time.Date(2026, time.January, 1, 21, 0, 0, 0, time.UTC)
+	for i := 0; i < 20; i++ {
+		close := 100 + float64(i*i)/10
+		candles = append(candles, ChartCandle{
+			Time:   start.AddDate(0, 0, i*7).Unix(),
+			Open:   close - 1,
+			High:   close + 1,
+			Low:    close - 2,
+			Close:  close,
+			Volume: 1_000_000,
+		})
+	}
+
+	macd := calcMACD(candles)
+	if len(macd) != len(candles) {
+		t.Fatalf("expected chart MACD to start before full warmup: got %d points for %d candles", len(macd), len(candles))
+	}
+	if macd[0].Time != candles[0].Time || macd[0].MACD != 0 || macd[0].Signal != 0 {
+		t.Fatalf("expected MACD to be seeded from first close, got %+v", macd[0])
+	}
+}
+
 func TestLowerHighsRemainVisibleAfterReclaimButSetupIsInactive(t *testing.T) {
 	candles := make([]ChartCandle, 0, 60)
 	start := time.Date(2026, time.January, 1, 21, 0, 0, 0, time.UTC)
