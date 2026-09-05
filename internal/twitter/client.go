@@ -5,6 +5,7 @@ package twitter
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -33,14 +34,72 @@ func NewFetcher(provider, bearerToken string, nitterInstances []string) (Fetcher
 		}
 		return NewAPIClient(bearerToken), nil
 	case "nitter", "":
-		instances := nitterInstances
-		if len(instances) == 0 {
-			instances = []string{"https://nitter.net"}
+		instances := resolveNitterInstances(nitterInstances)
+		nitter := NewNitterClient(instances)
+		if bearerToken == "" {
+			return nitter, nil
 		}
-		return NewNitterClient(instances), nil
+		return FallbackFetcher{Primary: nitter, Fallback: NewAPIClient(bearerToken)}, nil
 	default:
 		return nil, fmt.Errorf("unknown twitter provider %q (valid: \"api\", \"nitter\")", provider)
 	}
+}
+
+type FallbackFetcher struct {
+	Primary  Fetcher
+	Fallback Fetcher
+}
+
+func (f FallbackFetcher) GetRecentTweets(ctx context.Context, username string, count int) ([]Tweet, error) {
+	tweets, primaryErr := f.Primary.GetRecentTweets(ctx, username, count)
+	if primaryErr == nil {
+		return tweets, nil
+	}
+	tweets, fallbackErr := f.Fallback.GetRecentTweets(ctx, username, count)
+	if fallbackErr == nil {
+		return tweets, nil
+	}
+	return nil, fmt.Errorf("primary fetch failed: %w; fallback fetch failed: %w", primaryErr, fallbackErr)
+}
+
+func resolveNitterInstances(configured []string) []string {
+	var instances []string
+	seen := map[string]bool{}
+	add := func(values []string) {
+		for _, instance := range values {
+			instance = strings.TrimRight(strings.TrimSpace(instance), "/")
+			if instance == "" || seen[instance] {
+				continue
+			}
+			seen[instance] = true
+			instances = append(instances, instance)
+		}
+	}
+	if len(configured) > 0 {
+		add(configured)
+	}
+	if raw := os.Getenv("NITTER_INSTANCES"); raw != "" {
+		var envInstances []string
+		for _, instance := range strings.Split(raw, ",") {
+			if instance = strings.TrimSpace(instance); instance != "" {
+				envInstances = append(envInstances, instance)
+			}
+		}
+		add(envInstances)
+	}
+	add([]string{
+		"https://xcancel.com",
+		"https://nitter.tiekoetter.com",
+		"https://nitter.privacyredirect.com",
+		"https://nitter.kuuro.net",
+		"https://nitter.poast.org",
+		"https://lightbrd.com",
+		"https://nitter.space",
+		"https://nuku.trabun.org",
+		"https://nitter.catsarch.com",
+		"https://nitter.kareem.one",
+	})
+	return instances
 }
 
 // FilterRecent keeps only tweets from today or yesterday (in local time).

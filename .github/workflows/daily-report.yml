@@ -37,10 +37,9 @@ jobs:
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           echo "📊 Generating stock market report..."
-          ./stock-checker -config config.json -output report.html -prompt-output prompt.txt -prompt-html-output prompt.html -verbose
+          ./stock-checker -config config.json -output report.html -no-twitter -verbose
           echo "✅ HTML report generated"
 
       - name: Send email report
@@ -57,7 +56,7 @@ jobs:
           secure: true
 
       - name: Send prompt email
-        if: hashFiles('prompt.html') != ''
+        if: ${{ false }} # Temporarily disabled along with report.enable_prompts.
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com

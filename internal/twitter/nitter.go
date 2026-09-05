@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -34,16 +35,16 @@ func NewNitterClient(instances []string) *NitterClient {
 // GetRecentTweets fetches the last `count` tweets from the user's Nitter RSS feed.
 // It tries each configured instance in order and returns on the first success.
 func (c *NitterClient) GetRecentTweets(ctx context.Context, username string, count int) ([]Tweet, error) {
-	var lastErr error
+	var failures []string
 	for _, instance := range c.instances {
 		tweets, err := c.fetchFromInstance(ctx, instance, username, count)
 		if err != nil {
-			lastErr = fmt.Errorf("%s: %w", instance, err)
+			failures = append(failures, fmt.Sprintf("%s: %v", instance, err))
 			continue
 		}
 		return tweets, nil
 	}
-	return nil, fmt.Errorf("all Nitter instances failed for @%s (last error: %w)", username, lastErr)
+	return nil, fmt.Errorf("all Nitter instances failed for @%s (%s)", username, strings.Join(failures, "; "))
 }
 
 func (c *NitterClient) fetchFromInstance(ctx context.Context, instance, username string, count int) ([]Tweet, error) {
@@ -73,20 +74,28 @@ func (c *NitterClient) fetchFromInstance(ctx context.Context, instance, username
 	if len(feed.Channel.Items) == 0 {
 		return nil, fmt.Errorf("empty feed")
 	}
+	if strings.Contains(strings.ToLower(feed.Channel.Title), "not yet whitelisted") {
+		return nil, fmt.Errorf("RSS reader is not whitelisted by this instance")
+	}
 
 	tweets := make([]Tweet, 0, count)
+	invalidItems := 0
 	for _, item := range feed.Channel.Items {
 		if isPinned(item) || isRetweet(item) {
 			continue
 		}
 		t, err := item.toTweet()
 		if err != nil {
+			invalidItems++
 			continue
 		}
 		tweets = append(tweets, t)
 		if len(tweets) == count {
 			break
 		}
+	}
+	if len(tweets) == 0 && invalidItems > 0 {
+		return nil, fmt.Errorf("feed contains no valid tweets (%d invalid items)", invalidItems)
 	}
 	return tweets, nil
 }
@@ -95,6 +104,7 @@ func (c *NitterClient) fetchFromInstance(ctx context.Context, instance, username
 type rssChannel struct {
 	XMLName xml.Name `xml:"rss"`
 	Channel struct {
+		Title string    `xml:"title"`
 		Items []rssItem `xml:"item"`
 	} `xml:"channel"`
 }
@@ -110,12 +120,25 @@ type rssItem struct {
 
 // toTweet converts an RSS item to a Tweet.
 func (item rssItem) toTweet() (Tweet, error) {
+	link, err := url.Parse(item.Link)
+	if err != nil || (link.Scheme != "https" && link.Scheme != "http") || link.Host == "" {
+		return Tweet{}, fmt.Errorf("invalid tweet link %q", item.Link)
+	}
+	parts := strings.Split(strings.Trim(link.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] != "status" || parts[2] == "" {
+		return Tweet{}, fmt.Errorf("RSS item is not a tweet: %q", item.Link)
+	}
+	for _, digit := range parts[2] {
+		if digit < '0' || digit > '9' {
+			return Tweet{}, fmt.Errorf("invalid tweet ID %q", parts[2])
+		}
+	}
 	t, err := time.Parse(time.RFC1123Z, item.PubDate)
 	if err != nil {
 		// Fallback: try without timezone offset
 		t, err = time.Parse(time.RFC1123, item.PubDate)
 		if err != nil {
-			t = time.Now()
+			return Tweet{}, fmt.Errorf("invalid tweet date %q: %w", item.PubDate, err)
 		}
 	}
 	return Tweet{

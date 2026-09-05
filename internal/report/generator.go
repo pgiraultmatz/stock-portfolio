@@ -12,6 +12,7 @@ import (
 
 	"stock-portfolio/internal/ai"
 	"stock-portfolio/internal/models"
+	"stock-portfolio/internal/news"
 )
 
 //go:embed templates/*.html
@@ -19,6 +20,7 @@ var templateFS embed.FS
 
 // Generator creates HTML reports from stock analysis results.
 type Generator struct {
+	ShowPositions     bool
 	templates         *template.Template
 	categoryEmojis    map[string]string
 	categoryOrder     map[string]int
@@ -49,6 +51,7 @@ type TemplateData struct {
 	VIX              *VIXData
 	EarningsCalendar []EarningsEventData
 	EconomicEvents   []EconomicEventData
+	News             *news.Digest
 }
 
 // EconomicEventData represents a macro economic event for the template.
@@ -228,8 +231,15 @@ func (g *Generator) Generate(results []*models.StockResult) (string, error) {
 }
 
 // GenerateWithAI creates an HTML report with optional AI analysis or manual prompt.
-func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai.Analysis, manualPrompt string, vix *VIXData, economicEvents []EconomicEventData) (string, error) {
+func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai.Analysis, manualPrompt string, vix *VIXData, economicEvents []EconomicEventData, newsDigests ...*news.Digest) (string, error) {
 	data := g.prepareTemplateData(results)
+	if !g.ShowPositions {
+		data.CategoryGroups = nil
+		data.TotalStocks = 0
+		data.OversoldCount = 0
+		data.OverboughtCount = 0
+		data.Title = "Veille de marché"
+	}
 
 	if aiAnalysis != nil {
 		data.AIAnalysis = g.convertAIAnalysis(aiAnalysis)
@@ -240,6 +250,12 @@ func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai
 
 	data.VIX = vix
 	data.EconomicEvents = economicEvents
+	if len(newsDigests) > 0 {
+		data.News = newsDigests[0]
+		if len(results) == 0 && data.News != nil {
+			data.Title = "Veille de marché"
+		}
+	}
 
 	var buf bytes.Buffer
 	if err := g.templates.ExecuteTemplate(&buf, "report.html", data); err != nil {

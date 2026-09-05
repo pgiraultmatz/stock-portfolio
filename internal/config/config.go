@@ -14,6 +14,7 @@ import (
 
 	"stock-portfolio/internal/macro"
 	"stock-portfolio/internal/models"
+	"stock-portfolio/internal/news"
 )
 
 // Config holds the application configuration.
@@ -23,9 +24,19 @@ type Config struct {
 	YahooAPI    YahooAPIConfig    `json:"yahoo_api"`
 	AI          AIConfig          `json:"ai"`
 	Twitter     TwitterConfig     `json:"twitter"`
+	News        news.Config       `json:"news"`
+	Report      ReportConfig      `json:"report"`
 	XGroups     []XGroup          `json:"xGroups"`
 	Alerts      AlertConfig       `json:"alerts"`
 	Concurrency int               `json:"concurrency"`
+}
+
+// ReportConfig enables optional sections and collection in the daily report.
+// These are opt-in even when older configurations still enable AI or Twitter.
+type ReportConfig struct {
+	ShowPositions bool `json:"show_positions"`
+	EnablePrompts bool `json:"enable_prompts"`
+	FetchTweets   bool `json:"fetch_tweets"`
 }
 
 // AIConfig holds AI/Anthropic API configuration.
@@ -72,6 +83,7 @@ type YahooAPIConfig struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return &Config{
+		News: news.Config{Enabled: true, MaxArticles: 12, MaxPerStock: 2, LookbackHours: 72},
 		YahooAPI: YahooAPIConfig{
 			BaseURL:   "https://query1.finance.yahoo.com/v8/finance/chart",
 			Range:     "1y",

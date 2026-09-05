@@ -59,6 +59,40 @@ GH_TOKEN=ghp_xxx go run main.go
 
 ## Options
 
+### Portfolio news in daily reports
+
+Daily reports currently show news, VIX and the earnings/macro calendars.
+The position recap, AI/manual prompts and tweet collection are paused by default,
+including for older Gist configurations. The optional `report` settings
+`show_positions`, `enable_prompts` and `fetch_tweets` can re-enable them.
+Prompts and tweets also require their respective `ai.enabled`/`twitter.enabled`
+settings. The daily workflow explicitly skips Twitter and pauses the prompt email.
+
+The stock-checker report includes recent Yahoo Finance RSS articles without an
+API key. Articles mentioning portfolio companies come first, followed by watchlist
+companies and configured themes. Defaults: 72 hours, 12 articles, at most 2 per
+company. Set `news.enabled` to `false` to disable collection in full reports.
+
+The `news` section in `config-example.json` supports company `aliases`, theme
+`keywords`, and additional RSS `feeds`. Themes filter the collected feeds; they
+do not initiate a separate web search. Company matching uses names, aliases and
+explicit tickers, so ambiguous names can still require adjustment.
+
+Articles retain the source excerpt and original language, publication time in
+UTC, and link. Deduplication uses canonical URLs and identical normalized titles;
+different articles about the same event are not yet grouped semantically. Feed
+failures are shown as partial coverage. Collected excerpts also feed the existing
+manual/AI analysis prompt; news display itself does not require an AI call.
+
+To collect news only (no stock quote requests, AI calls, or Gist writes):
+
+```bash
+go run ./cmd/stock-checker -news-only -output news.html
+```
+
+Like the daily report, this reads the configured Gist when `GIST_ID` is set,
+otherwise the local `-config` file. RSS availability and coverage vary by company.
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--addr` | `:8080` | Listen address |

@@ -67,6 +67,7 @@ type XGroupSection struct {
 type PromptContext struct {
 	VIXLine string
 	XGroups []XGroupSection
+	News    string
 }
 
 // FormatXGroups concatenates all group contents into a single string for API mode.
@@ -96,6 +97,7 @@ func BuildPromptFromContent(results []*models.StockResult, templateContent strin
 		sb.WriteString("\n")
 	}
 	sb.WriteString(stockData)
+	sb.WriteString(ctx.News)
 
 	for i, group := range ctx.XGroups {
 		if group.Content == "" {
@@ -119,14 +121,14 @@ func BuildPromptFromContent(results []*models.StockResult, templateContent strin
 }
 
 // Analyze performs AI analysis on stock results.
-// twitterContext is optional: if non-empty, it is included in the prompt as additional context.
-func (a *Analyzer) Analyze(ctx context.Context, results []*models.StockResult, twitterContext string) (*Analysis, error) {
+// additionalContext holds optional sourced news and social context.
+func (a *Analyzer) Analyze(ctx context.Context, results []*models.StockResult, additionalContext string) (*Analysis, error) {
 	// Prepare stock data for the prompt
 	stockData := a.prepareStockData(results)
 
-	twitterSection := ""
-	if twitterContext != "" {
-		twitterSection = "\n\nContexte additionnel — analyses récentes d'un trader quantitatif crypto:\n" + twitterContext
+	contextSection := ""
+	if additionalContext != "" {
+		contextSection = "\n\nContexte additionnel — actualités et publications collectées :\n" + additionalContext
 	}
 
 	systemPrompt := []byte(a.promptTemplate)
@@ -145,7 +147,7 @@ Réponds UNIQUEMENT en JSON valide avec cette structure exacte:
     {"ticker": "XXX", "name": "Nom", "action": "buy|sell|hold|watch", "reason": "Raison courte", "risk": "low|medium|high"}
   ],
   "market_summary": "Résumé en 1-2 phrases de la situation globale du portefeuille. Mentionne également les dates importantes des prochaines semaines pour ce portefeuille (publications de résultats, dividendes, décisions de banques centrales, indicateurs macro) en précisant les tickers concernés."
-}`, stockData+twitterSection)
+}`, stockData+contextSection)
 
 	response, err := a.client.Complete(ctx, string(systemPrompt), userPrompt, 2000)
 	if err != nil {

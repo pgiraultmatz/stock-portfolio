@@ -22,6 +22,7 @@ import (
 	"stock-portfolio/internal/macro"
 	"stock-portfolio/internal/marketdigest"
 	"stock-portfolio/internal/models"
+	"stock-portfolio/internal/news"
 	"stock-portfolio/internal/report"
 	"stock-portfolio/internal/technicalalerts"
 	"stock-portfolio/internal/twitter"
@@ -69,6 +70,7 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "Timeout for the entire operation")
 	mock := flag.Bool("mock", false, "Use mock data instead of fetching from APIs (for testing report generation)")
 	noTwitter := flag.Bool("no-twitter", false, "Skip Twitter fetching")
+	newsOnly := flag.Bool("news-only", false, "Generate a news-only HTML report without stock quotes, AI calls or Gist writes")
 	twitterOnly := flag.Bool("twitter-only", false, "Fetch tweets and output a standalone analysis prompt (no Yahoo Finance)")
 	checkAlerts := flag.Bool("check-alerts", false, "Check intraday price alerts and write report if any are triggered")
 	alertsOutput := flag.String("alerts-output", "alerts.html", "Path to write the alerts HTML report")
@@ -104,10 +106,19 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("configuration loaded", "stocks", len(cfg.Stocks), "concurrency", cfg.Concurrency)
+	cfg.AI.Enabled = cfg.AI.Enabled && cfg.Report.EnablePrompts
+	cfg.Twitter.Enabled = cfg.Twitter.Enabled && cfg.Report.FetchTweets
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+	if *newsOnly {
+		if err := runNewsReport(ctx, cfg, *outputPath, logger); err != nil {
+			logger.Error("news report failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Price alert mode: check intraday variations, write report only if new alerts triggered
 	if *checkAlerts {
@@ -163,7 +174,7 @@ func main() {
 
 	// Mock report mode: skip all API calls
 	if *mock {
-		if err := runMockReport(*outputPath, *promptHTMLOutput, logger); err != nil {
+		if err := runMockReport(*outputPath, *promptHTMLOutput, cfg.Report, logger); err != nil {
 			logger.Error("mock report failed", "error", err)
 			os.Exit(1)
 		}
@@ -192,14 +203,36 @@ func main() {
 	}
 }
 
-func runMockReport(outputPath, promptHTMLOutput string, logger *slog.Logger) error {
-	logger.Info("generating mock report with manual prompt (no API calls)")
+func runNewsReport(ctx context.Context, cfg *config.Config, outputPath string, logger *slog.Logger) error {
+	digest := news.NewClient().Collect(ctx, cfg.Stocks, cfg.News, time.Now())
+	logger.Info("news collected", "articles", len(digest.Articles), "failed_feeds", digest.FailedFeeds, "total_feeds", digest.TotalFeeds)
+	generator, err := report.NewGenerator(nil, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	content, err := generator.GenerateWithAI(nil, nil, "", nil, nil, &digest)
+	if err != nil {
+		return err
+	}
+	if outputPath != "" {
+		return os.WriteFile(outputPath, []byte(content), 0644)
+	}
+	fmt.Println(content)
+	return nil
+}
+
+func runMockReport(outputPath, promptHTMLOutput string, preferences config.ReportConfig, logger *slog.Logger) error {
+	logger.Info("generating mock report")
 
 	results := mockStockResults()
 
-	promptTemplate, err := config.LoadPrompt()
-	if err != nil {
-		logger.Warn("failed to load prompt template", "error", err)
+	var promptTemplate string
+	if preferences.EnablePrompts {
+		var err error
+		promptTemplate, err = config.LoadPrompt()
+		if err != nil {
+			logger.Warn("failed to load prompt template", "error", err)
+		}
 	}
 
 	const mockSep = "────────────────────────────────────────────────────────────"
@@ -258,11 +291,16 @@ Microsoft capex guidance Q3 > +40% YoY. Toute la chaîne data center en profite 
 		},
 	}
 
-	manualPrompt, err := ai.BuildPromptFromContent(results, promptTemplate, ai.PromptContext{XGroups: mockXGroups})
-	if err != nil {
-		logger.Warn("failed to build manual prompt, continuing without it", "error", err)
-	} else {
-		logger.Info("manual prompt generated for copy-paste")
+	var manualPrompt string
+	if preferences.EnablePrompts {
+		if !preferences.FetchTweets {
+			mockXGroups = nil
+		}
+		var err error
+		manualPrompt, err = ai.BuildPromptFromContent(results, promptTemplate, ai.PromptContext{XGroups: mockXGroups})
+		if err != nil {
+			logger.Warn("failed to build manual prompt, continuing without it", "error", err)
+		}
 	}
 
 	generator, err := report.NewGenerator(
@@ -278,6 +316,7 @@ Microsoft capex guidance Q3 > +40% YoY. Toute la chaîne data center en profite 
 		return fmt.Errorf("creating report generator: %w", err)
 	}
 
+	generator.ShowPositions = preferences.ShowPositions
 	htmlReport, err := generator.GenerateWithAI(results, nil, manualPrompt, nil, nil)
 	if err != nil {
 		return fmt.Errorf("generating mock report: %w", err)
@@ -421,18 +460,34 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 		vixData = report.NewVIXData(vix.CurrentPrice, vix.ChangePercent)
 	}
 
-	// Load prompt template from Gist
-	promptTemplate, err := config.LoadPrompt()
-	if err != nil {
-		logger.Warn("failed to load prompt template, continuing without it", "error", err)
+	var promptTemplate string
+	if cfg.AI.Enabled {
+		var err error
+		promptTemplate, err = config.LoadPrompt()
+		if err != nil {
+			logger.Warn("failed to load prompt template, continuing without it", "error", err)
+		}
 	}
 
-	// Run AI analysis if enabled
+	// Collect news independently of the optional AI analysis.
+	var newsDigest *news.Digest
+	var newsContext string
+	if cfg.News.Enabled {
+		logger.Info("fetching portfolio news", "stocks", len(cfg.Stocks))
+		digest := news.NewClient().Collect(ctx, cfg.Stocks, cfg.News, time.Now())
+		newsDigest = &digest
+		if cfg.AI.Enabled {
+			newsContext = digest.Prompt()
+		}
+		logger.Info("portfolio news fetched", "articles", len(digest.Articles), "failed_feeds", digest.FailedFeeds, "total_feeds", digest.TotalFeeds)
+	}
+
 	var aiAnalysis *ai.Analysis
 	var manualPrompt string
+	var err error
 	if cfg.AI.Enabled {
 		if cfg.AI.Mode == "manual_prompt" {
-			promptCtx := ai.PromptContext{XGroups: xGroups}
+			promptCtx := ai.PromptContext{XGroups: xGroups, News: newsContext}
 			if vixData != nil {
 				promptCtx.VIXLine = fmt.Sprintf("- VIX: %s (%s) — %s\n", vixData.Price, vixData.Change, vixData.Level)
 			}
@@ -470,7 +525,7 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 				aiAnalyzer := ai.NewAnalyzer(aiClient, promptTemplate)
 
 				var err error
-				aiAnalysis, err = aiAnalyzer.Analyze(ctx, results, ai.FormatXGroups(xGroups))
+				aiAnalysis, err = aiAnalyzer.Analyze(ctx, results, ai.FormatXGroups(xGroups)+newsContext)
 				if err != nil {
 					logger.Warn("AI analysis failed, continuing without it", "error", err)
 				} else {
@@ -532,7 +587,8 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 		return fmt.Errorf("creating report generator: %w", err)
 	}
 
-	htmlReport, err := generator.GenerateWithAI(results, aiAnalysis, manualPrompt, vixData, economicEvents)
+	generator.ShowPositions = cfg.Report.ShowPositions
+	htmlReport, err := generator.GenerateWithAI(results, aiAnalysis, manualPrompt, vixData, economicEvents, newsDigest)
 	if err != nil {
 		return fmt.Errorf("generating report: %w", err)
 	}

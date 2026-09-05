@@ -28,5 +28,36 @@
     "thresholds": [3.0, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0],
     "state_path": ".alert-state.json"
   },
+  "report": {
+    "show_positions": false,
+    "enable_prompts": false,
+    "fetch_tweets": false
+  },
+  "news": {
+    "enabled": true,
+    "max_articles": 12,
+    "max_per_stock": 2,
+    "lookback_hours": 72,
+    "aliases": { "MC.PA": ["LVMH", "Louis Vuitton"] },
+    "themes": [
+      { "name": "Semi-conducteurs", "keywords": ["semiconductor", "semiconductors"] },
+      { "name": "Infrastructure IA", "keywords": ["data center", "data centers"] }
+    ],
+    "feeds": []
+  },
+  "twitter": {
+    "enabled": false,
+    "provider": "nitter",
+    "max_tweets": 4,
+    "request_delay_seconds": 1,
+    "nitter_instances": [
+      "https://xcancel.com",
+      "https://nitter.tiekoetter.com",
+      "https://nitter.privacyredirect.com"
+    ]
+  },
+  "xGroups": [
+    { "name": "Market", "accounts": ["KillaXBT"] }
+  ],
   "concurrency": 10
 }

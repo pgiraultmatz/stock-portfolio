@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f6f8fa;color:#24292f;line-height:1.6;padding:20px}
@@ -69,6 +70,16 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
 .news-item{padding:10px 0;border-bottom:1px solid #eaecef}
 .news-headline{font-weight:600;font-size:13px}
 .news-description{font-size:12px;color:#656d76;margin-top:4px}
+.portfolio-news{padding:18px 24px;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}
+.portfolio-news h2{font-size:16px;margin-bottom:4px}
+.portfolio-news h3{font-size:14px;line-height:1.5;margin:4px 0}
+.portfolio-news a{color:#0969da;text-decoration:none}.portfolio-news a:hover{text-decoration:underline}
+.portfolio-news article{padding:14px 0;border-top:1px solid #eaecef}
+.portfolio-news .news-meta{font-size:11px;color:#656d76}
+.portfolio-news .news-priority{font-size:11px;font-weight:700;color:#116329}
+.portfolio-news .news-secondary{color:#57606a}
+.portfolio-news .news-warning{font-size:12px;color:#9a6700;margin:8px 0}
+@media(max-width:600px){.portfolio-news{padding:14px 16px}}
 .recommendation{padding:10px 0;border-bottom:1px solid #eaecef}
 .action-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;text-transform:uppercase}
 .action-badge.positive{background:#1a7f37;color:#fff}.action-badge.negative{background:#cf222e;color:#fff}
@@ -82,7 +93,7 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
             <h1>📊 {{.Title}}</h1>
             <p class="date">{{.GeneratedAt}}</p>
             <div class="stats">
-                <span class="stat">{{.TotalStocks}} stocks tracked</span>
+                {{if .TotalStocks}}<span class="stat">{{.TotalStocks}} stocks tracked</span>{{end}}
                 {{if gt .OversoldCount 0}}
                 <span class="stat">🔴 {{.OversoldCount}} oversold</span>
                 {{end}}
@@ -133,6 +144,24 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
                 {{end}}
             </div>
         </div>
+        {{end}}
+
+        {{with .News}}
+        <section class="portfolio-news" aria-label="Actualités du portefeuille">
+            <h2>Actualités à suivre</h2>
+            <p class="news-meta">Dernières {{.LookbackHours}} heures · Dates en UTC</p>
+            {{if .FailedFeeds}}<p class="news-warning">Couverture partielle : {{.FailedFeeds}} flux indisponible(s) sur {{.TotalFeeds}}.</p>{{end}}
+            {{range .Articles}}
+            <article>
+                <div class="news-priority {{if ne .Priority 0}}news-secondary{{end}}">{{if eq .Priority 0}}Portefeuille{{else if eq .Priority 1}}Valeurs suivies{{else}}Thèmes suivis{{end}}{{range .Tickers}} · {{.}}{{end}}</div>
+                <h3><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a></h3>
+                <div class="news-meta">{{.Source}} · {{.PublishedAt.UTC.Format "02/01/2006 15:04"}}</div>
+                {{if .Summary}}<p class="news-description"><span class="news-meta">Extrait :</span> {{.Summary}}</p>{{end}}
+            </article>
+            {{else}}
+            <p class="news-description">Aucune actualité pertinente dans les flux disponibles sur cette période.</p>
+            {{end}}
+        </section>
         {{end}}
 
         {{range .CategoryGroups}}
