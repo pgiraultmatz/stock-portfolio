@@ -149,18 +149,14 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
         {{with .News}}
         <section class="portfolio-news" aria-label="Actualités du portefeuille">
             <h2>Actualités à suivre</h2>
-            <p class="news-meta">Dernières {{.LookbackHours}} heures · Dates en UTC</p>
-            {{if .FailedFeeds}}<p class="news-warning">Couverture partielle : {{.FailedFeeds}} flux indisponible(s) sur {{.TotalFeeds}}.</p>{{end}}
-            {{range .Articles}}
-            <article>
-                <div class="news-priority {{if ne .Priority 0}}news-secondary{{end}}">{{if eq .Priority 0}}Portefeuille{{else if eq .Priority 1}}Valeurs suivies{{else}}Thèmes suivis{{end}}{{range .Tickers}} · {{.}}{{end}}</div>
-                <h3><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a></h3>
-                <div class="news-meta">{{.Source}} · {{.PublishedAt.UTC.Format "02/01/2006 15:04"}}</div>
-                {{if .Summary}}<p class="news-description"><span class="news-meta">Extrait :</span> {{.Summary}}</p>{{end}}
-            </article>
-            {{else}}
-            <p class="news-description">Aucune actualité pertinente dans les flux disponibles sur cette période.</p>
-            {{end}}
+            {{template "news-items" .}}
+        </section>
+        {{end}}
+
+        {{with .CryptoNews}}
+        <section class="portfolio-news" aria-label="Veille cryptos">
+            <h2>Veille cryptos</h2>
+            {{template "news-items" .}}
         </section>
         {{end}}
 
@@ -288,3 +284,18 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
         </div>
     </div>
 </html>
+
+{{define "news-items"}}
+<p class="news-meta">Dernières {{.LookbackHours}} heures · Dates en UTC</p>
+{{if .FailedFeeds}}<p class="news-warning">Couverture partielle : {{.FailedFeeds}} flux indisponible(s) sur {{.TotalFeeds}}.</p>{{end}}
+{{range .Articles}}
+<article>
+    <div class="news-priority {{if ne .Priority 0}}news-secondary{{end}}">{{if eq .Priority 0}}Portefeuille{{else if eq .Priority 1}}Valeurs suivies{{else}}Thèmes suivis{{end}}{{range .Tickers}} · {{.}}{{end}}</div>
+    <h3><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a></h3>
+    <div class="news-meta">{{.Source}} · {{.PublishedAt.UTC.Format "02/01/2006 15:04"}}</div>
+    {{if .Summary}}<p class="news-description"><span class="news-meta">Extrait :</span> {{.Summary}}</p>{{end}}
+</article>
+{{else}}
+<p class="news-description">Aucune actualité pertinente dans les flux disponibles sur cette période.</p>
+{{end}}
+{{end}}

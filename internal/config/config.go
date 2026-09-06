@@ -25,6 +25,7 @@ type Config struct {
 	AI          AIConfig          `json:"ai"`
 	Twitter     TwitterConfig     `json:"twitter"`
 	News        news.Config       `json:"news"`
+	CryptoNews  news.Config       `json:"crypto_news"`
 	Report      ReportConfig      `json:"report"`
 	XGroups     []XGroup          `json:"xGroups"`
 	Alerts      AlertConfig       `json:"alerts"`
@@ -83,7 +84,8 @@ type YahooAPIConfig struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		News: news.Config{Enabled: true, MaxArticles: 12, MaxPerStock: 2, LookbackHours: 72},
+		CryptoNews: news.DefaultCryptoConfig(),
+		News:       news.Config{Enabled: true, MaxArticles: 12, MaxPerStock: 2, LookbackHours: 72},
 		YahooAPI: YahooAPIConfig{
 			BaseURL:   "https://query1.finance.yahoo.com/v8/finance/chart",
 			Range:     "1y",

@@ -60,3 +60,28 @@ func TestHiddenPositionsPreservesCalendarsAndNews(t *testing.T) {
 		}
 	}
 }
+
+func TestCryptoNewsRendersIndependently(t *testing.T) {
+	g, err := NewGenerator(nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := news.Digest{LookbackHours: 72, Articles: []news.Article{{Title: "Bitcoin news", URL: "https://example.com/btc", PublishedAt: time.Now(), Priority: 1, Tickers: []string{"BTC-USD"}}}}
+	content, err := g.GenerateWithAI(nil, nil, "", nil, nil, nil, &digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "<h2>Veille cryptos</h2>") || !strings.Contains(content, "Bitcoin news") {
+		t.Fatal("crypto section missing")
+	}
+	if strings.Contains(content, "<h2>Actualités à suivre</h2>") || strings.Contains(content, `<table class="stock-table">`) {
+		t.Fatal("unrequested section displayed")
+	}
+	content, err = g.GenerateWithAI(nil, nil, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(content, "<h2>Veille cryptos</h2>") {
+		t.Fatal("disabled crypto section displayed")
+	}
+}

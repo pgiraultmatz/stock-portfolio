@@ -204,13 +204,12 @@ func main() {
 }
 
 func runNewsReport(ctx context.Context, cfg *config.Config, outputPath string, logger *slog.Logger) error {
-	digest := news.NewClient().Collect(ctx, cfg.Stocks, cfg.News, time.Now())
-	logger.Info("news collected", "articles", len(digest.Articles), "failed_feeds", digest.FailedFeeds, "total_feeds", digest.TotalFeeds)
+	digest, cryptoDigest := collectReportNews(ctx, cfg, logger)
 	generator, err := report.NewGenerator(nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
-	content, err := generator.GenerateWithAI(nil, nil, "", nil, nil, &digest)
+	content, err := generator.GenerateWithAI(nil, nil, "", nil, nil, digest, cryptoDigest)
 	if err != nil {
 		return err
 	}
@@ -219,6 +218,19 @@ func runNewsReport(ctx context.Context, cfg *config.Config, outputPath string, l
 	}
 	fmt.Println(content)
 	return nil
+}
+
+func collectReportNews(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*news.Digest, *news.Digest) {
+	portfolio, crypto := news.NewClient().CollectSections(ctx, cfg.Stocks, cfg.News, cfg.CryptoNews, time.Now())
+	for _, section := range []struct {
+		name   string
+		digest *news.Digest
+	}{{"portfolio", portfolio}, {"crypto", crypto}} {
+		if d := section.digest; d != nil {
+			logger.Info("news collected", "section", section.name, "articles", len(d.Articles), "failed_feeds", d.FailedFeeds, "total_feeds", d.TotalFeeds)
+		}
+	}
+	return portfolio, crypto
 }
 
 func runMockReport(outputPath, promptHTMLOutput string, preferences config.ReportConfig, logger *slog.Logger) error {
@@ -470,16 +482,15 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 
 	// Collect news independently of the optional AI analysis.
-	var newsDigest *news.Digest
+	newsDigest, cryptoDigest := collectReportNews(ctx, cfg, logger)
 	var newsContext string
-	if cfg.News.Enabled {
-		logger.Info("fetching portfolio news", "stocks", len(cfg.Stocks))
-		digest := news.NewClient().Collect(ctx, cfg.Stocks, cfg.News, time.Now())
-		newsDigest = &digest
-		if cfg.AI.Enabled {
-			newsContext = digest.Prompt()
+	if cfg.AI.Enabled {
+		if newsDigest != nil {
+			newsContext += newsDigest.Prompt()
 		}
-		logger.Info("portfolio news fetched", "articles", len(digest.Articles), "failed_feeds", digest.FailedFeeds, "total_feeds", digest.TotalFeeds)
+		if cryptoDigest != nil {
+			newsContext += cryptoDigest.Prompt()
+		}
 	}
 
 	var aiAnalysis *ai.Analysis
@@ -588,7 +599,7 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 
 	generator.ShowPositions = cfg.Report.ShowPositions
-	htmlReport, err := generator.GenerateWithAI(results, aiAnalysis, manualPrompt, vixData, economicEvents, newsDigest)
+	htmlReport, err := generator.GenerateWithAI(results, aiAnalysis, manualPrompt, vixData, economicEvents, newsDigest, cryptoDigest)
 	if err != nil {
 		return fmt.Errorf("generating report: %w", err)
 	}

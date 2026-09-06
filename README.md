@@ -61,6 +61,16 @@ GH_TOKEN=ghp_xxx go run main.go
 
 ### Portfolio news in daily reports
 
+A separate **Veille cryptos** section is enabled by default via `crypto_news`.
+It uses Yahoo RSS for BTC-USD, ETH-USD and SOL-USD plus assets in categories
+starting with `Crypto` (case-insensitive). Configured holding flags are preserved;
+the three default assets are otherwise treated as watched, not owned.
+Each section has its own limits: crypto defaults to 6 articles, 2 per asset,
+and 72 hours. `crypto_news` accepts the same aliases, themes and extra RSS feeds
+as `news`. Matching crypto articles are not repeated in the company section.
+Set `crypto_news.enabled` to `false` to pause only crypto coverage. No API key
+or workflow change is needed. This does not re-enable prompts, tweets or positions.
+
 Daily reports currently show news, VIX and the earnings/macro calendars.
 The position recap, AI/manual prompts and tweet collection are paused by default,
 including for older Gist configurations. The optional `report` settings

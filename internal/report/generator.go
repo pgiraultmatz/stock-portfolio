@@ -52,6 +52,7 @@ type TemplateData struct {
 	EarningsCalendar []EarningsEventData
 	EconomicEvents   []EconomicEventData
 	News             *news.Digest
+	CryptoNews       *news.Digest
 }
 
 // EconomicEventData represents a macro economic event for the template.
@@ -255,6 +256,9 @@ func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai
 		if len(results) == 0 && data.News != nil {
 			data.Title = "Veille de marché"
 		}
+	}
+	if len(newsDigests) > 1 {
+		data.CryptoNews = newsDigests[1]
 	}
 
 	var buf bytes.Buffer

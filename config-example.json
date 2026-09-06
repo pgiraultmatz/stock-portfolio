@@ -33,6 +33,12 @@
     "enable_prompts": false,
     "fetch_tweets": false
   },
+  "crypto_news": {
+    "enabled": true,
+    "max_articles": 6,
+    "max_per_stock": 2,
+    "lookback_hours": 72
+  },
   "news": {
     "enabled": true,
     "max_articles": 12,
