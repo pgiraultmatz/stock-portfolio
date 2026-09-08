@@ -11,6 +11,7 @@ import (
 )
 
 type tickerGroup struct {
+	InPortfolio *bool
 	Ticker      string
 	Name        string
 	Category    string
@@ -25,6 +26,7 @@ type timeframeSignals struct {
 }
 
 type multiTickerGroup struct {
+	InPortfolio     *bool
 	Ticker          string
 	Name            string
 	Category        string
@@ -44,18 +46,11 @@ type ChangeSummary struct {
 	HasWeeklyChange bool
 }
 
-type topPick struct {
-	ticker  string
-	name    string
-	score   int
-	signals []string
-}
-
 func GenerateReport(divergences []divergencealerts.Alert, technical []technicalalerts.Alert, timeframe string, emaThreshold float64) string {
 	return GenerateReportWithCategoryOrder(divergences, technical, timeframe, emaThreshold, nil)
 }
 
-func GenerateReportWithCategoryOrder(divergences []divergencealerts.Alert, technical []technicalalerts.Alert, timeframe string, emaThreshold float64, categoryOrder map[string]int) string {
+func GenerateReportWithCategoryOrder(divergences []divergencealerts.Alert, technical []technicalalerts.Alert, timeframe string, emaThreshold float64, categoryOrder map[string]int, options ...RankingOptions) string {
 	sortDivergences(divergences)
 	sortTechnical(technical)
 	groups := groupByTicker(divergences, technical)
@@ -66,7 +61,8 @@ func GenerateReportWithCategoryOrder(divergences []divergencealerts.Alert, techn
 	sb.WriteString(fmt.Sprintf("<h2>Market Signal Digest - %s</h2>\n", time.Now().Format("02/01/2006")))
 	sb.WriteString(fmt.Sprintf("<p class=\"muted\">%d categories · %d tickers · %d RSI divergences · %d technical signals · EMA proximity threshold %.2f%%</p>\n", len(categories), len(groups), len(divergences), len(technical), emaThreshold))
 
-	writeTopSection(&sb, groups)
+	writeTopSection(&sb, groups, timeframe, rankingOptions(options))
+	writeFinancialSection(&sb, rankingOptions(options))
 
 	for _, category := range categories {
 		writeCategorySection(&sb, category)
@@ -103,6 +99,7 @@ func writeHeader(sb *strings.Builder) {
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body { font-family: Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #24303d; }
   h2 { color: #24303d; border-bottom: 2px solid #34495e; padding-bottom: 8px; }
@@ -128,6 +125,14 @@ func writeHeader(sb *strings.Builder) {
   .watch { color: #9b6a1d; font-weight: bold; }
   .neutral { color: #2d8f6f; font-weight: bold; }
   .footer { margin-top: 16px; font-size: 12px; color: #999; }
+  .top-picks { table-layout: fixed; }
+  .financial-table { table-layout: fixed; }
+  .financial-table th:first-child { width: 20%; }
+  .financial-table td { font-size: 12px; line-height: 1.6; }
+  .top-picks th, .top-picks td { width: 50%; overflow-wrap: anywhere; }
+  .pick-action { display: block; font-weight: bold; margin: 4px 0; }
+  .pick-reasons { font-size: 12px; margin: 4px 0 10px; padding-left: 16px; }
+  @media (max-width: 600px) { body { padding: 12px; } .top-picks th, .top-picks td { padding: 8px; } }
 </style>
 </head>
 <body>
@@ -138,7 +143,7 @@ func GenerateMultiTimeframeReport(dailyDivergences []divergencealerts.Alert, dai
 	return GenerateMultiTimeframeReportWithChanges(dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, dailyEMAThreshold, weeklyEMAThreshold, categoryOrder, nil)
 }
 
-func GenerateMultiTimeframeReportWithChanges(dailyDivergences []divergencealerts.Alert, dailyTechnical []technicalalerts.Alert, weeklyDivergences []divergencealerts.Alert, weeklyTechnical []technicalalerts.Alert, dailyEMAThreshold float64, weeklyEMAThreshold float64, categoryOrder map[string]int, changes map[string]ChangeSummary) string {
+func GenerateMultiTimeframeReportWithChanges(dailyDivergences []divergencealerts.Alert, dailyTechnical []technicalalerts.Alert, weeklyDivergences []divergencealerts.Alert, weeklyTechnical []technicalalerts.Alert, dailyEMAThreshold float64, weeklyEMAThreshold float64, categoryOrder map[string]int, changes map[string]ChangeSummary, options ...RankingOptions) string {
 	sortDivergences(dailyDivergences)
 	sortDivergences(weeklyDivergences)
 	sortTechnical(dailyTechnical)
@@ -162,7 +167,8 @@ func GenerateMultiTimeframeReportWithChanges(dailyDivergences []divergencealerts
 		weeklyEMAThreshold,
 	))
 
-	writeTopSectionMulti(&sb, groups)
+	writeTopSectionMulti(&sb, groups, rankingOptions(options))
+	writeFinancialSection(&sb, rankingOptions(options))
 	for _, category := range categories {
 		writeCategorySectionMulti(&sb, category)
 	}
@@ -196,11 +202,13 @@ func groupByTicker(divergences []divergencealerts.Alert, technical []technicalal
 	byTicker := make(map[string]*tickerGroup)
 	for _, alert := range divergences {
 		g := ensureGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
+		g.InPortfolio = alert.Stock.InPortfolio
 		g.Divergences = append(g.Divergences, alert)
 		g.LastClose = alert.LastClose
 	}
 	for _, alert := range technical {
 		g := ensureGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
+		g.InPortfolio = alert.Stock.InPortfolio
 		g.Technical = append(g.Technical, alert)
 		if alert.LastClose > 0 {
 			g.LastClose = alert.LastClose
@@ -225,6 +233,7 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 	byTicker := make(map[string]*multiTickerGroup)
 	for _, alert := range dailyDivergences {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
+		g.InPortfolio = alert.Stock.InPortfolio
 		g.Daily.Divergences = append(g.Daily.Divergences, alert)
 		g.LastClose = alert.LastClose
 		g.DailyChange = alert.ChangePercent
@@ -232,6 +241,7 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 	}
 	for _, alert := range dailyTechnical {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
+		g.InPortfolio = alert.Stock.InPortfolio
 		g.Daily.Technical = append(g.Daily.Technical, alert)
 		if alert.LastClose > 0 {
 			g.LastClose = alert.LastClose
@@ -241,6 +251,7 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 	}
 	for _, alert := range weeklyDivergences {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
+		g.InPortfolio = alert.Stock.InPortfolio
 		g.Weekly.Divergences = append(g.Weekly.Divergences, alert)
 		if g.LastClose == 0 {
 			g.LastClose = alert.LastClose
@@ -250,6 +261,7 @@ func groupByTickerMulti(dailyDivergences []divergencealerts.Alert, dailyTechnica
 	}
 	for _, alert := range weeklyTechnical {
 		g := ensureMultiGroup(byTicker, alert.Stock.Ticker, alert.Stock.Name, alert.Stock.Category)
+		g.InPortfolio = alert.Stock.InPortfolio
 		g.Weekly.Technical = append(g.Weekly.Technical, alert)
 		if g.LastClose == 0 && alert.LastClose > 0 {
 			g.LastClose = alert.LastClose
@@ -321,86 +333,6 @@ type multiCategoryGroup struct {
 	Tickers []multiTickerGroup
 }
 
-func topByBias(groups []tickerGroup, bias string, limit int) []topPick {
-	var picks []topPick
-	for _, group := range groups {
-		pick := topPick{ticker: group.Ticker, name: group.Name}
-		for _, alert := range group.Divergences {
-			if alert.Divergence.Kind != bias {
-				continue
-			}
-			pick.score++
-			pick.signals = append(pick.signals, strings.ToUpper(alert.Divergence.Kind)+" RSI divergence")
-		}
-		for _, alert := range group.Technical {
-			if alert.Bias != bias {
-				continue
-			}
-			pick.score++
-			pick.signals = append(pick.signals, alert.Label)
-		}
-		if pick.score > 0 {
-			picks = append(picks, pick)
-		}
-	}
-	sort.SliceStable(picks, func(i, j int) bool {
-		if picks[i].score == picks[j].score {
-			return picks[i].ticker < picks[j].ticker
-		}
-		return picks[i].score > picks[j].score
-	})
-	if len(picks) > limit {
-		return picks[:limit]
-	}
-	return picks
-}
-
-func topByBiasMulti(groups []multiTickerGroup, bias string, limit int) []topPick {
-	var picks []topPick
-	for _, group := range groups {
-		pick := topPick{ticker: group.Ticker, name: group.Name}
-		dailyScore := appendBiasSignals(&pick, group.Daily, bias, "D")
-		weeklyScore := appendBiasSignals(&pick, group.Weekly, bias, "W")
-		pick.score = dailyScore + weeklyScore
-		if dailyScore > 0 && weeklyScore > 0 {
-			pick.score += 2
-			pick.signals = append(pick.signals, "daily+weekly alignment")
-		}
-		if pick.score > 0 {
-			picks = append(picks, pick)
-		}
-	}
-	sort.SliceStable(picks, func(i, j int) bool {
-		if picks[i].score == picks[j].score {
-			return picks[i].ticker < picks[j].ticker
-		}
-		return picks[i].score > picks[j].score
-	})
-	if len(picks) > limit {
-		return picks[:limit]
-	}
-	return picks
-}
-
-func appendBiasSignals(pick *topPick, signals timeframeSignals, bias string, prefix string) int {
-	score := 0
-	for _, alert := range signals.Divergences {
-		if alert.Divergence.Kind != bias {
-			continue
-		}
-		score++
-		pick.signals = append(pick.signals, prefix+": "+strings.ToUpper(alert.Divergence.Kind)+" RSI divergence")
-	}
-	for _, alert := range signals.Technical {
-		if alert.Bias != bias {
-			continue
-		}
-		score++
-		pick.signals = append(pick.signals, prefix+": "+alert.Label)
-	}
-	return score
-}
-
 type categoryGroup struct {
 	Name    string
 	Tickers []tickerGroup
@@ -444,58 +376,6 @@ func ensureGroup(groups map[string]*tickerGroup, ticker, name, category string) 
 	g = &tickerGroup{Ticker: ticker, Name: name, Category: category}
 	groups[ticker] = g
 	return g
-}
-
-func writeTopSection(sb *strings.Builder, groups []tickerGroup) {
-	bullish := topByBias(groups, "bullish", 3)
-	bearish := topByBias(groups, "bearish", 3)
-	if len(bullish) == 0 && len(bearish) == 0 {
-		return
-	}
-	sb.WriteString("<h3>Top Signals</h3>\n")
-	sb.WriteString("<table>\n")
-	sb.WriteString("  <tr><th>Top bullish</th><th>Top bearish</th></tr>\n")
-	sb.WriteString("  <tr><td>")
-	writeTopList(sb, bullish, "bullish")
-	sb.WriteString("</td><td>")
-	writeTopList(sb, bearish, "bearish")
-	sb.WriteString("</td></tr>\n")
-	sb.WriteString("</table>\n")
-}
-
-func writeTopSectionMulti(sb *strings.Builder, groups []multiTickerGroup) {
-	bullish := topByBiasMulti(groups, "bullish", 3)
-	bearish := topByBiasMulti(groups, "bearish", 3)
-	if len(bullish) == 0 && len(bearish) == 0 {
-		return
-	}
-	sb.WriteString("<h3>Top Signals</h3>\n")
-	sb.WriteString("<table>\n")
-	sb.WriteString("  <tr><th>Top bullish</th><th>Top bearish</th></tr>\n")
-	sb.WriteString("  <tr><td>")
-	writeTopList(sb, bullish, "bullish")
-	sb.WriteString("</td><td>")
-	writeTopList(sb, bearish, "bearish")
-	sb.WriteString("</td></tr>\n")
-	sb.WriteString("</table>\n")
-}
-
-func writeTopList(sb *strings.Builder, picks []topPick, className string) {
-	if len(picks) == 0 {
-		sb.WriteString(`<span class="muted">None</span>`)
-		return
-	}
-	sb.WriteString(`<ol class="signal-list">`)
-	for _, pick := range picks {
-		sb.WriteString(fmt.Sprintf(
-			`<li><span class="%s">%s</span> <span class="muted">%d signals</span><br><span class="muted">%s</span></li>`,
-			className,
-			pick.ticker,
-			pick.score,
-			strings.Join(pick.signals, ", "),
-		))
-	}
-	sb.WriteString(`</ol>`)
 }
 
 func writeCategorySection(sb *strings.Builder, category categoryGroup) {

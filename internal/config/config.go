@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -306,15 +307,16 @@ func LoadPrompt() (string, error) {
 
 // StockFundamentals holds the pre-calculated data for a single stock.
 type StockFundamentals struct {
-	RSI           float64 `json:"rsi,omitempty"`
-	TargetPrice   float64 `json:"target_price,omitempty"`
-	TargetPct     float64 `json:"target_pct,omitempty"` // (target - price) / price * 100
-	PEGRatio      float64 `json:"peg_ratio,omitempty"`
-	PSGRatio      float64 `json:"psg_ratio,omitempty"`
-	EVGrossProfit float64 `json:"ev_gross_profit,omitempty"`
-	NextEarnings  string  `json:"next_earnings,omitempty"` // RFC3339 datetime
-	Signal        string  `json:"signal,omitempty"`
-	SignalNote    string  `json:"signal_note,omitempty"`
+	FinancialQuality *models.FinancialQuality `json:"financial_quality,omitempty"`
+	RSI              float64                  `json:"rsi,omitempty"`
+	TargetPrice      float64                  `json:"target_price,omitempty"`
+	TargetPct        float64                  `json:"target_pct,omitempty"` // (target - price) / price * 100
+	PEGRatio         float64                  `json:"peg_ratio,omitempty"`
+	PSGRatio         float64                  `json:"psg_ratio,omitempty"`
+	EVGrossProfit    float64                  `json:"ev_gross_profit,omitempty"`
+	NextEarnings     string                   `json:"next_earnings,omitempty"` // RFC3339 datetime
+	Signal           string                   `json:"signal,omitempty"`
+	SignalNote       string                   `json:"signal_note,omitempty"`
 }
 
 // StockDataFile is the structure written to stock-data.json in the Gist.
@@ -351,11 +353,12 @@ func SaveFundamentals(results []*models.StockResult, signals map[string][2]strin
 			continue
 		}
 		f := StockFundamentals{
-			RSI:           r.RSI,
-			TargetPrice:   r.TargetPrice,
-			PEGRatio:      r.PEGRatio,
-			PSGRatio:      r.PSGRatio,
-			EVGrossProfit: r.EVGrossProfit,
+			FinancialQuality: r.FinancialQuality,
+			RSI:              r.RSI,
+			TargetPrice:      r.TargetPrice,
+			PEGRatio:         r.PEGRatio,
+			PSGRatio:         r.PSGRatio,
+			EVGrossProfit:    r.EVGrossProfit,
 		}
 		if r.TargetPrice > 0 && r.CurrentPrice > 0 {
 			f.TargetPct = (r.TargetPrice - r.CurrentPrice) / r.CurrentPrice * 100
@@ -413,13 +416,19 @@ func LoadFundamentals() map[string]StockFundamentals {
 
 // LoadStockData reads stock-data.json from the Gist.
 func LoadStockData() *StockDataFile {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return LoadStockDataContext(ctx)
+}
+
+func LoadStockDataContext(ctx context.Context) *StockDataFile {
 	gistID := os.Getenv("GIST_ID")
 	token := os.Getenv("GH_TOKEN")
 	if gistID == "" || token == "" {
 		return nil
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/gists/"+gistID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/gists/"+gistID, nil)
 	if err != nil {
 		return nil
 	}
@@ -427,10 +436,13 @@ func LoadStockData() *StockDataFile {
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil {
 		return nil
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
 
 	var gist struct {
 		Files map[string]struct {

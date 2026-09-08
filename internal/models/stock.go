@@ -18,6 +18,7 @@ func (s Stock) IsInPortfolio() bool {
 
 // StockResult contains the analysis results for a stock.
 type StockResult struct {
+	FinancialQuality *FinancialQuality
 	Stock            Stock
 	CurrentPrice     float64
 	ChangePercent    float64

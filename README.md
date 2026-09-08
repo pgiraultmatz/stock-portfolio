@@ -59,6 +59,75 @@ GH_TOKEN=ghp_xxx go run main.go
 
 ## Options
 
+### Market signal digest priorities
+
+The market signal digest replaces its bullish/bearish counts with up to three
+buy/reinforcement candidates and three trim/exit candidates. Buy candidates include
+holdings and watchlist entries; trim/exit candidates only include holdings
+(`inPortfolio: false` excludes a stock; an omitted flag retains the existing
+held-by-default convention). Detailed technical tables remain below the top lists.
+
+To show up to five candidates per side:
+
+```bash
+go run ./cmd/stock-checker -check-market-digest -market-digest-timeframe both -market-digest-top 5
+```
+
+The existing workflow needs no change for the default top three. Add
+`-market-digest-top 5` to its stock-checker invocation to select five instead.
+
+Ranking groups EMA crossings and breakouts into a structure family, and RSI,
+MACD and divergences into a momentum family. Each family contributes at most once
+per timeframe. Directional candidates require both families; daily/weekly
+agreement receives a bonus, contrary signals reduce the score, and contrary
+weekly structure excludes the candidate. EMA proximity alone does not qualify.
+Recent signals break score ties; weaker configurations do not fill empty slots.
+
+Technical signals expire after 7 calendar days (daily) or 21 (weekly); divergence
+pivots expire after 14 or 42 days respectively. Missing and future timestamps are
+excluded from ranking. An overbought bearish RSI divergence with positive structure
+and no bullish momentum confirmation can instead produce a trim candidate.
+Each candidate shows its evidence and date, not an inflated indicator count.
+
+This is a technical review heuristic, not a calibrated probability or an automatic
+trading instruction. Financial metrics do not change this ranking; position size
+and tax considerations are not included.
+
+The separate **Valorisation / qualité financière** section is an independent
+top three (or five), scanning the entire portfolio and watchlist, not the
+technical candidates. Only Yahoo-confirmed equities are eligible: cryptocurrencies,
+ETFs and other instruments never appear in this section. A stock can appear in
+both rankings when it qualifies independently. A report is generated even without
+technical alerts so financial opportunities are not hidden.
+
+The financial screen requires a positive PEG, net margin, revenue growth,
+operating cash flow and free cash flow, plus known nonnegative debt and cash.
+It compares eligible stocks by relative rank: PEG (lower, 40%), net margin
+(higher, 20%), revenue growth (higher, 20%), and net debt divided by operating cash
+flow (lower, 20%; net cash is treated as zero leverage). Ties receive equal rank;
+final ties use PEG then ticker. This is an explicit, uncalibrated screening
+heuristic, not fair value, a probability, or a sector-adjusted comparison.
+It does not rank turnarounds with negative earnings or cash flow as opportunities.
+Coverage and excluded incomplete/old data counts are displayed; empty slots
+are never filled with ineligible stocks.
+
+The section reuses cached PEG, PSG and EV/gross-profit ratios from
+`stock-data.json`. The existing Yahoo valuation request also collects trailing
+and forward P/E, net and operating margins, revenue growth, operating and free
+cash flow, debt, cash and financial currency. Daily report runs persist these new
+fields under `financial_quality`; older Gists remain compatible.
+
+The digest reuses snapshots collected within 24 hours, refreshing older or missing
+data throughout the configured universe through the same Yahoo client. This
+enrichment has a 120-second budget within the overall command timeout, uses the
+configured concurrency capped at four, and never writes to the Gist. Failed
+refreshes retain cached values but missing, undated, future or older-than-24-hour
+required data cannot enter the financial ranking. Missing values are N/D, not zero.
+Collection dates are retrieval times, not statement dates: the Yahoo fields have
+different reporting/forecast periods and must not be treated as synchronized
+financial statements. Monetary values use millions or billions of the financial currency,
+which may differ from the stock's trading currency. No workflow change is needed.
+
 ### Portfolio news in daily reports
 
 A separate **Veille cryptos** section is enabled by default via `crypto_news`.

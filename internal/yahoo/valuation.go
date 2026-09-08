@@ -6,14 +6,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
+
+	"stock-portfolio/internal/models"
 )
+
+type optionalNumber struct {
+	Raw *float64 `json:"raw"`
+}
 
 type valuationResponse struct {
 	QuoteSummary struct {
 		Result []struct {
+			QuoteType struct {
+				QuoteType string `json:"quoteType"`
+			} `json:"quoteType"`
+			SummaryDetail struct {
+				TrailingPE optionalNumber `json:"trailingPE"`
+				ForwardPE  optionalNumber `json:"forwardPE"`
+			} `json:"summaryDetail"`
 			FinancialData struct {
-				TargetMeanPrice struct {
+				FinancialCurrency string         `json:"financialCurrency"`
+				ProfitMargins     optionalNumber `json:"profitMargins"`
+				OperatingMargins  optionalNumber `json:"operatingMargins"`
+				RevenueGrowth     optionalNumber `json:"revenueGrowth"`
+				OperatingCashflow optionalNumber `json:"operatingCashflow"`
+				FreeCashflow      optionalNumber `json:"freeCashflow"`
+				TotalDebt         optionalNumber `json:"totalDebt"`
+				TotalCash         optionalNumber `json:"totalCash"`
+				TargetMeanPrice   struct {
 					Raw float64 `json:"raw"`
 				} `json:"targetMeanPrice"`
 				GrossProfits struct {
@@ -63,10 +85,11 @@ type pegTimeseriesResponse struct {
 
 // ValuationData holds all fetched valuation metrics for a ticker.
 type ValuationData struct {
-	TargetPrice   float64
-	PEGRatio      float64
-	PSGRatio      float64 // EV/fwdRevenue ÷ fwdRevenueGrowth%
-	EVGrossProfit float64 // EV / Gross Profit (TTM)
+	FinancialQuality *models.FinancialQuality
+	TargetPrice      float64
+	PEGRatio         float64
+	PSGRatio         float64 // EV/fwdRevenue ÷ fwdRevenueGrowth%
+	EVGrossProfit    float64 // EV / Gross Profit (TTM)
 }
 
 // GetValuation fetches target price, trailing PEG, and PSG ratio for a ticker.
@@ -78,11 +101,11 @@ func (c *Client) GetValuation(ctx context.Context, ticker string) (ValuationData
 	}
 
 	// Single quoteSummary call: financialData + defaultKeyStatistics + earningsTrend
-	url := fmt.Sprintf(
-		"https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=financialData,defaultKeyStatistics,earningsTrend&crumb=%s",
-		ticker, c.crumb,
+	endpoint := fmt.Sprintf(
+		"https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=financialData,defaultKeyStatistics,earningsTrend,summaryDetail,quoteType&crumb=%s",
+		url.PathEscape(ticker), url.QueryEscape(c.crumb),
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return result, fmt.Errorf("creating request: %w", err)
 	}
@@ -100,6 +123,15 @@ func (c *Client) GetValuation(ctx context.Context, ticker string) (ValuationData
 		var v valuationResponse
 		if json.Unmarshal(body, &v) == nil && v.QuoteSummary.Error == nil && len(v.QuoteSummary.Result) > 0 {
 			r := v.QuoteSummary.Result[0]
+			result.FinancialQuality = &models.FinancialQuality{
+				CollectedAt: time.Now().UTC(), QuoteType: r.QuoteType.QuoteType,
+				Currency:   r.FinancialData.FinancialCurrency,
+				TrailingPE: r.SummaryDetail.TrailingPE.Raw, ForwardPE: r.SummaryDetail.ForwardPE.Raw,
+				ProfitMargin: r.FinancialData.ProfitMargins.Raw, OperatingMargin: r.FinancialData.OperatingMargins.Raw,
+				RevenueGrowth:     r.FinancialData.RevenueGrowth.Raw,
+				OperatingCashflow: r.FinancialData.OperatingCashflow.Raw, FreeCashflow: r.FinancialData.FreeCashflow.Raw,
+				TotalDebt: r.FinancialData.TotalDebt.Raw, TotalCash: r.FinancialData.TotalCash.Raw,
+			}
 			result.TargetPrice = r.FinancialData.TargetMeanPrice.Raw
 
 			ev := r.DefaultKeyStatistics.EnterpriseValue.Raw
@@ -124,24 +156,31 @@ func (c *Client) GetValuation(ctx context.Context, ticker string) (ValuationData
 		}
 	}
 
+	var summaryErr error
+	if result.FinancialQuality == nil {
+		summaryErr = fmt.Errorf("valuation summary unavailable (HTTP %d)", resp.StatusCode)
+	} else if kind := result.FinancialQuality.QuoteType; kind != "" && kind != "EQUITY" {
+		return result, nil
+	}
+
 	// Fetch trailingPegRatio (5yr expected, IBES consensus) from fundamentals timeseries
 	now := time.Now()
 	period1 := now.AddDate(0, -3, 0).Unix()
 	period2 := now.Unix()
 	tsURL := fmt.Sprintf(
 		"https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/%s?type=trailingPegRatio&period1=%d&period2=%d&crumb=%s",
-		ticker, period1, period2, c.crumb,
+		url.PathEscape(ticker), period1, period2, url.QueryEscape(c.crumb),
 	)
 	req2, err := http.NewRequestWithContext(ctx, http.MethodGet, tsURL, nil)
 	if err != nil {
-		return result, nil
+		return result, summaryErr
 	}
 	req2.Header.Set("User-Agent", c.config.UserAgent)
 	req2.Header.Set("Accept", "application/json")
 
 	resp2, err := c.httpClient.Do(req2)
 	if err != nil {
-		return result, nil
+		return result, summaryErr
 	}
 	defer resp2.Body.Close()
 
@@ -156,5 +195,5 @@ func (c *Client) GetValuation(ctx context.Context, ticker string) (ValuationData
 		}
 	}
 
-	return result, nil
+	return result, summaryErr
 }

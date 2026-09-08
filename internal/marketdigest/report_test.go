@@ -3,6 +3,7 @@ package marketdigest
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"stock-portfolio/internal/chartcalc"
 	"stock-portfolio/internal/divergencealerts"
@@ -68,28 +69,33 @@ func TestGenerateReportUsesCategoryOrder(t *testing.T) {
 	}
 }
 
-func TestGenerateReportIncludesTopBullishAndBearish(t *testing.T) {
+func TestGenerateReportIncludesTopBuyAndSellCandidates(t *testing.T) {
 	bullish := models.Stock{Ticker: "MSFT", Name: "Microsoft", Category: "USA"}
 	bearish := models.Stock{Ticker: "TSLA", Name: "Tesla", Category: "USA"}
 	watch := models.Stock{Ticker: "AAPL", Name: "Apple", Category: "USA"}
 
 	html := GenerateReport(
 		[]divergencealerts.Alert{
-			{Stock: bullish, Divergence: chartcalc.Divergence{Kind: "bullish"}, LastClose: 100},
-			{Stock: bearish, Divergence: chartcalc.Divergence{Kind: "bearish"}, LastClose: 100},
+			{Stock: bullish, Divergence: chartcalc.Divergence{Kind: "bullish", ToTime: time.Now().Add(-time.Hour).Unix()}, LastClose: 100},
+			{Stock: bearish, Divergence: chartcalc.Divergence{Kind: "bearish", ToTime: time.Now().Add(-time.Hour).Unix()}, LastClose: 100},
 		},
 		[]technicalalerts.Alert{
-			{Stock: bullish, Kind: technicalalerts.EMAReclaim, Label: "EMA50 reclaim", Bias: "bullish", LastClose: 100},
-			{Stock: bearish, Kind: technicalalerts.EMALoss, Label: "EMA50 loss", Bias: "bearish", LastClose: 100},
+			{Stock: bullish, Kind: technicalalerts.EMAReclaim, Label: "EMA50 reclaim", Bias: "bullish", LastClose: 100, CandleTime: time.Now().Add(-time.Hour).Unix()},
+			{Stock: bearish, Kind: technicalalerts.EMALoss, Label: "EMA50 loss", Bias: "bearish", LastClose: 100, CandleTime: time.Now().Add(-time.Hour).Unix()},
 			{Stock: watch, Kind: technicalalerts.EMAProximity, Label: "EMA50 touch", Bias: "watch", LastClose: 100},
 		},
 		"daily",
 		1.5,
 	)
 
-	for _, expected := range []string{"Top Signals", "MSFT", "TSLA", "2 signals"} {
+	for _, expected := range []string{"Top 3 achats / renforcements", "Top 3 allègements / ventes", "Renforcement à étudier", "Protection / sortie à étudier", "MSFT", "TSLA"} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("expected report to contain %q", expected)
+		}
+	}
+	for _, removed := range []string{"Top bullish", "Top bearish", "2 signals"} {
+		if strings.Contains(html, removed) {
+			t.Fatalf("obsolete ranking remains: %s", removed)
 		}
 	}
 }

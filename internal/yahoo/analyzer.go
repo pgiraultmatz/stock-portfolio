@@ -46,8 +46,8 @@ func (a *Analyzer) AnalyzeStock(ctx context.Context, stock models.Stock) *models
 		err  error
 	}
 	type valuationResult struct {
-		target, peg, psg, evgp float64
-		err                    error
+		data ValuationData
+		err  error
 	}
 
 	chartCh := make(chan chartResult, 1)
@@ -59,7 +59,7 @@ func (a *Analyzer) AnalyzeStock(ctx context.Context, stock models.Stock) *models
 	}()
 	go func() {
 		v, err := a.client.GetValuation(ctx, stock.Ticker)
-		valCh <- valuationResult{v.TargetPrice, v.PEGRatio, v.PSGRatio, v.EVGrossProfit, err}
+		valCh <- valuationResult{v, err}
 	}()
 
 	cr := <-chartCh
@@ -95,12 +95,12 @@ func (a *Analyzer) AnalyzeStock(ctx context.Context, stock models.Stock) *models
 	vr := <-valCh
 	if vr.err != nil {
 		a.logger.Warn("failed to fetch valuation", "ticker", stock.Ticker, "error", vr.err)
-	} else {
-		result.TargetPrice = vr.target
-		result.PEGRatio = vr.peg
-		result.PSGRatio = vr.psg
-		result.EVGrossProfit = vr.evgp
 	}
+	result.TargetPrice = vr.data.TargetPrice
+	result.PEGRatio = vr.data.PEGRatio
+	result.PSGRatio = vr.data.PSGRatio
+	result.EVGrossProfit = vr.data.EVGrossProfit
+	result.FinancialQuality = vr.data.FinancialQuality
 
 	return result
 }
