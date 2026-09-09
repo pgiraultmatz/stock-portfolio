@@ -1,0 +1,70 @@
+name: Financial Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      top_count:
+        description: Number of financial candidates
+        required: true
+        default: "50"
+        type: choice
+        options:
+          - "3"
+          - "5"
+          - "10"
+          - "20"
+          - "30"
+          - "50"
+      send_email:
+        description: Send the report by email
+        type: boolean
+        default: false
+
+env:
+  GO_VERSION: '1.25.x'
+
+jobs:
+  financial-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build application
+        run: go build -o stock-checker ./cmd/stock-checker
+
+      - name: Generate financial review
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TOP_COUNT: ${{ inputs.top_count }}
+        run: ./stock-checker -config config.json -check-financial-digest -financial-digest-top "$TOP_COUNT" -financial-digest-output financial-review.html -verbose
+
+      - name: Upload financial review
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-review-${{ github.run_number }}
+          path: financial-review.html
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Send financial review email
+        if: inputs.send_email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Financial Review - ${{ github.run_number }}"
+          html_body: file://financial-review.html
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>
+          secure: true

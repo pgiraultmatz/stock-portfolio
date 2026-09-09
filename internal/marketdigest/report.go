@@ -62,7 +62,6 @@ func GenerateReportWithCategoryOrder(divergences []divergencealerts.Alert, techn
 	sb.WriteString(fmt.Sprintf("<p class=\"muted\">%d categories · %d tickers · %d RSI divergences · %d technical signals · EMA proximity threshold %.2f%%</p>\n", len(categories), len(groups), len(divergences), len(technical), emaThreshold))
 
 	writeTopSection(&sb, groups, timeframe, rankingOptions(options))
-	writeFinancialSection(&sb, rankingOptions(options))
 
 	for _, category := range categories {
 		writeCategorySection(&sb, category)
@@ -168,7 +167,6 @@ func GenerateMultiTimeframeReportWithChanges(dailyDivergences []divergencealerts
 	))
 
 	writeTopSectionMulti(&sb, groups, rankingOptions(options))
-	writeFinancialSection(&sb, rankingOptions(options))
 	for _, category := range categories {
 		writeCategorySectionMulti(&sb, category)
 	}

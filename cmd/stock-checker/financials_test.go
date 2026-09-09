@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,24 @@ import (
 	"stock-portfolio/internal/models"
 	"stock-portfolio/internal/yahoo"
 )
+
+func TestStandaloneFinancialReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "financial-review.html")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := runFinancialDigest(context.Background(), &config.Config{}, path, 5, logger); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "Revue financière") || !strings.Contains(string(content), "Top 5 valorisation") || strings.Contains(string(content), "Market Signal") {
+		t.Fatal("wrong report generated")
+	}
+	if err := runFinancialDigest(context.Background(), &config.Config{}, path, 4, logger); err == nil {
+		t.Fatal("invalid limit accepted")
+	}
+}
 
 func TestDigestFinancialCacheAndFallback(t *testing.T) {
 	now := time.Date(2026, 9, 8, 20, 0, 0, 0, time.UTC)

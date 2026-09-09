@@ -93,12 +93,26 @@ This is a technical review heuristic, not a calibrated probability or an automat
 trading instruction. Financial metrics do not change this ranking; position size
 and tax considerations are not included.
 
-The separate **Valorisation / qualité financière** section is an independent
-top three (or five), scanning the entire portfolio and watchlist, not the
-technical candidates. Only Yahoo-confirmed equities are eligible: cryptocurrencies,
-ETFs and other instruments never appear in this section. A stock can appear in
-both rankings when it qualifies independently. A report is generated even without
-technical alerts so financial opportunities are not hidden.
+### Standalone financial review
+
+**Financial Review** is a separate report intended for a weekly review, triggered
+manually through `.github/workflows/financial-review.yml` (no scheduled runs).
+In GitHub Actions, select **Financial Review**, then **Run workflow**; the default
+is up to 50 candidates (3, 5, 10, 20 and 30 are also available). Optionally enable email
+delivery. Fewer candidates are shown if fewer qualify. The HTML is always
+uploaded as an artifact. It uses the existing Gist secrets; email additionally
+uses the existing email secrets.
+
+To generate only this report locally, without technical chart checks or email:
+
+```bash
+go run ./cmd/stock-checker -check-financial-digest -financial-digest-top 50 -financial-digest-output financial-review.html
+```
+
+The financial review scans the entire portfolio and watchlist, not the technical
+candidates. Only Yahoo-confirmed equities are eligible: cryptocurrencies, ETFs
+and other instruments never appear in its rankings. The Market Signal Digest
+remains technical-only and does not fetch or display this financial review.
 
 The financial screen requires a positive PEG, net margin, revenue growth,
 operating cash flow and free cash flow, plus known nonnegative debt and cash.
@@ -117,7 +131,7 @@ and forward P/E, net and operating margins, revenue growth, operating and free
 cash flow, debt, cash and financial currency. Daily report runs persist these new
 fields under `financial_quality`; older Gists remain compatible.
 
-The digest reuses snapshots collected within 24 hours, refreshing older or missing
+The financial review reuses snapshots collected within 24 hours, refreshing older or missing
 data throughout the configured universe through the same Yahoo client. This
 enrichment has a 120-second budget within the overall command timeout, uses the
 configured concurrency capped at four, and never writes to the Gist. Failed
@@ -126,7 +140,8 @@ required data cannot enter the financial ranking. Missing values are N/D, not ze
 Collection dates are retrieval times, not statement dates: the Yahoo fields have
 different reporting/forecast periods and must not be treated as synchronized
 financial statements. Monetary values use millions or billions of the financial currency,
-which may differ from the stock's trading currency. No workflow change is needed.
+which may differ from the stock's trading currency. Existing market workflows
+remain unchanged; only the new financial workflow produces this report.
 
 ### Portfolio news in daily reports
 

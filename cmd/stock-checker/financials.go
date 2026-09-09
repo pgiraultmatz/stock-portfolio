@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -10,6 +12,21 @@ import (
 	"stock-portfolio/internal/marketdigest"
 	"stock-portfolio/internal/yahoo"
 )
+
+func runFinancialDigest(ctx context.Context, cfg *config.Config, outputPath string, topCount int, logger *slog.Logger) error {
+	if topCount != 3 && topCount != 5 && topCount != 10 && topCount != 20 && topCount != 30 && topCount != 50 {
+		return fmt.Errorf("financial-digest-top must be 3, 5, 10, 20, 30 or 50")
+	}
+	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now()}
+	options.Financials = collectDigestFinancials(ctx, cfg, options.Now, logger)
+	options.FinancialsAt = time.Now()
+	report := marketdigest.GenerateFinancialReport(options)
+	if err := os.WriteFile(outputPath, []byte(report), 0644); err != nil {
+		return fmt.Errorf("writing financial review: %w", err)
+	}
+	logger.Info("financial review written", "path", outputPath)
+	return nil
+}
 
 func recentFinancials(at, now time.Time) bool {
 	return !at.IsZero() && !at.After(now) && now.Sub(at) <= 24*time.Hour

@@ -1,6 +1,7 @@
 package marketdigest
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -39,10 +40,46 @@ func financeFixture(ticker string, peg float64) FinancialContext {
 
 func TestIndependentFinancialRankingWithoutTechnicalSignals(t *testing.T) {
 	options := RankingOptions{Now: rankingNow, Financials: map[string]FinancialContext{"VALUE": financeFixture("VALUE", 1.0)}}
-	out := GenerateMultiTimeframeReportWithChanges(nil, nil, nil, nil, 1.5, 3, nil, nil, options)
-	_, financial, ok := strings.Cut(out, "Top 3 valorisation")
-	if !ok || !strings.Contains(financial, "<strong>VALUE</strong>") || !strings.Contains(out, "Aucune configuration suffisamment convergente") {
+	out := GenerateFinancialReport(options)
+	_, financial, ok := strings.Cut(out, "Top 50 valorisation")
+	if !ok || !strings.Contains(financial, "<strong>VALUE</strong>") || strings.Contains(out, "Market Signal") || strings.Contains(out, "achats / renforcements") {
 		t.Fatal("financial ranking still depends on technical signals")
+	}
+	market := GenerateMultiTimeframeReportWithChanges(nil, nil, nil, nil, 1.5, 3, nil, nil, options)
+	if strings.Contains(market, "qualité financière") || strings.Contains(market, "<strong>VALUE</strong>") {
+		t.Fatal("financial section leaked into market report")
+	}
+	single := GenerateReportWithCategoryOrder(nil, nil, "daily", 1.5, nil, options)
+	if strings.Contains(single, "qualité financière") {
+		t.Fatal("financial section leaked into single-timeframe report")
+	}
+}
+
+func TestFinancialDefaultTop50DoesNotChangeTechnicalLimit(t *testing.T) {
+	options := RankingOptions{Now: rankingNow, Financials: make(map[string]FinancialContext)}
+	for i := 0; i < 55; i++ {
+		ticker := fmt.Sprintf("STOCK%02d", i)
+		options.Financials[ticker] = financeFixture(ticker, float64(i+1))
+	}
+	picks, _ := rankFinancials(options)
+	if len(picks) != 50 || picks[49].ticker != "STOCK49" {
+		t.Fatalf("default top50 not applied: %d picks", len(picks))
+	}
+	out := GenerateFinancialReport(options)
+	if !strings.Contains(out, "Top 50 valorisation") || strings.Count(out, "<strong>STOCK") != 50 {
+		t.Fatal("rendered report truncated financial top")
+	}
+	if rankingOptions(nil).Limit != 3 {
+		t.Fatal("technical default changed")
+	}
+	for ticker := range options.Financials {
+		if ticker != "STOCK00" {
+			delete(options.Financials, ticker)
+		}
+	}
+	picks, _ = rankFinancials(options)
+	if len(picks) != 1 {
+		t.Fatal("weak/missing candidates used to fill top50")
 	}
 }
 
