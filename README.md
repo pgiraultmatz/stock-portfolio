@@ -163,8 +163,9 @@ Prompts and tweets also require their respective `ai.enabled`/`twitter.enabled`
 settings. The daily workflow explicitly skips Twitter and pauses the prompt email.
 
 The stock-checker report includes recent Yahoo Finance RSS articles without an
-API key. Articles mentioning portfolio companies come first, followed by watchlist
-companies and configured themes. Defaults: 72 hours, 12 articles, at most 2 per
+API key. Article selection prioritizes portfolio companies, then watchlist
+companies and configured themes. Selected articles are displayed newest first
+in both the company and crypto sections. Defaults: 72 hours, 12 articles, at most 2 per
 company. Set `news.enabled` to `false` to disable collection in full reports.
 
 The `news` section in `config-example.json` supports company `aliases`, theme

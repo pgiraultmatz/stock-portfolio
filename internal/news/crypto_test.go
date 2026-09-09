@@ -43,8 +43,8 @@ func TestCollectSectionsSeparatesAndDeduplicatesCrypto(t *testing.T) {
 	if portfolio.TotalFeeds != 1 || crypto.TotalFeeds != 3 || len(portfolio.Articles) != 1 || len(crypto.Articles) != 2 {
 		t.Fatalf("unexpected sections: %#v %#v", portfolio, crypto)
 	}
-	if portfolio.Articles[0].Title != "Oracle results" || crypto.Articles[0].Title != "Bitcoin ETF flows" || crypto.Articles[0].Priority != 0 {
-		t.Fatal("incorrect routing or holding priority")
+	if portfolio.Articles[0].Title != "Oracle results" || crypto.Articles[0].Title != "Oracle uses blockchain" || crypto.Articles[1].Title != "Bitcoin ETF flows" || crypto.Articles[1].Priority != 0 {
+		t.Fatal("incorrect routing, chronological order or holding priority")
 	}
 	portfolio, crypto = c.CollectSections(context.Background(), stocks, Config{Enabled: true}, Config{}, now)
 	if portfolio.TotalFeeds != 2 || crypto != nil {

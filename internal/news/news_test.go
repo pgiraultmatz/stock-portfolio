@@ -29,12 +29,40 @@ func TestRankPrioritizesHoldingsAndRejectsUnrelatedOrStaleNews(t *testing.T) {
 		t.Fatalf("expected 3 relevant articles, got %#v", got)
 	}
 	for i, article := range got {
-		if article.Priority != i {
+		if article.Priority != []int{1, 2, 0}[i] {
 			t.Errorf("item %d priority = %d", i, article.Priority)
 		}
 	}
-	if got[0].Tickers[0] != "ORCL" || got[1].Tickers[0] != "MU" {
+	if got[2].Tickers[0] != "ORCL" || got[0].Tickers[0] != "MU" {
 		t.Fatal("incorrect company matches")
+	}
+	limited := Rank(articles, stocks, Config{MaxArticles: 1}, now)
+	if len(limited) != 1 || limited[0].Tickers[0] != "ORCL" {
+		t.Fatal("chronological display changed portfolio selection priority")
+	}
+}
+
+func TestRankDisplaysNewestFirstForStocksAndCrypto(t *testing.T) {
+	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	watch := false
+	for _, names := range [][2]string{{"Oracle", "Micron"}, {"Bitcoin", "Ethereum"}} {
+		t.Run(names[0], func(t *testing.T) {
+			stocks := []models.Stock{{Ticker: "HELD", Name: names[0]}, {Ticker: "WATCH", Name: names[1], InPortfolio: &watch}}
+			articles := []Article{
+				{Title: names[0] + " results", URL: "https://example.com/old", PublishedAt: now.Add(-2 * time.Hour)},
+				{Title: "Industry update", Summary: names[0], URL: "https://example.com/middle", PublishedAt: now.Add(-time.Hour)},
+				{Title: names[1] + " news", URL: "https://example.com/new", PublishedAt: now},
+			}
+			got := Rank(articles, stocks, Config{}, now)
+			if len(got) != 3 {
+				t.Fatalf("unexpected article count: %d", len(got))
+			}
+			for i, want := range []string{"https://example.com/new", "https://example.com/middle", "https://example.com/old"} {
+				if got[i].URL != want {
+					t.Errorf("article %d: got %s, want %s", i, got[i].URL, want)
+				}
+			}
+		})
 	}
 }
 

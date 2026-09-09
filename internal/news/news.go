@@ -266,6 +266,10 @@ func Rank(articles []Article, stocks []models.Stock, cfg Config, now time.Time) 
 			break
 		}
 	}
+	// Keep relevance-based selection and quotas, then display newest first.
+	sort.SliceStable(selected, func(i, j int) bool {
+		return selected[i].PublishedAt.After(selected[j].PublishedAt)
+	})
 	return selected
 }
 
