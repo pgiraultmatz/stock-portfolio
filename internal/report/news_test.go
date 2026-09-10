@@ -61,6 +61,28 @@ func TestHiddenPositionsPreservesCalendarsAndNews(t *testing.T) {
 	}
 }
 
+func TestMacroCoverageWarningWithoutEvents(t *testing.T) {
+	g, err := NewGenerator(nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.EconomicCalendarWarning = "Calendrier partiel : Yahoo indisponible"
+	content, err := g.GenerateWithAI(nil, nil, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, g.EconomicCalendarWarning) {
+		t.Fatal("empty calendar hid coverage warning")
+	}
+	content, err = g.GenerateWithAI(nil, nil, "", nil, []EconomicEventData{{Name: "PPI US", Date: "Thu 10 Sep, 08:30 EDT"}, {Name: "CPI US", Date: "Fri 11 Sep, 08:30 EDT"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "Événements macro US à venir") || strings.Contains(content, "Événements macro cette semaine") {
+		t.Fatal("incorrect calendar horizon label")
+	}
+}
+
 func TestCryptoNewsRendersIndependently(t *testing.T) {
 	g, err := NewGenerator(nil, nil, nil, nil)
 	if err != nil {

@@ -155,7 +155,76 @@ as `news`. Matching crypto articles are not repeated in the company section.
 Set `crypto_news.enabled` to `false` to pause only crypto coverage. No API key
 or workflow change is needed. This does not re-enable prompts, tweets or positions.
 
-Daily reports currently show news, VIX and the earnings/macro calendars.
+Daily reports currently show news, a US equity market barometer (including VIX) and the
+earnings/macro calendars. The barometer is enabled automatically; no workflow
+change, API key or additional Gist setting is required.
+
+The barometer uses Yahoo chart quotes for `ES=F`, `NQ=F`, `^VIX`, `BZ=F` and
+`^TNX`, with source timestamps and changes against `chartPreviousClose` (never
+against the opening price). Each request has an eight-second timeout; failures
+do not stop the report. Its fixed heuristic is **not backtested or a probability
+of a green close**, and applies to broad US equities, not individual holdings or
+crypto:
+
+- Each equity future contributes +/-1 at a +/-0.10% move, +/-2 at +/-0.25%.
+- VIX changes contribute inversely: +/-1 at 3%, +/-2 at 10%. A level of 25 adds
+  a -1 penalty, 30 adds -2; the combined VIX contribution is capped at +/-2.
+  A low VIX level alone is not a bullish signal.
+- Brent rising at least 2% adds -1. A fall of at least 2% adds +1 only when both
+  equity futures rise at least 0.10%; otherwise it is neutral.
+- The US 10-year yield rising at least 5 basis points adds -1; falling at least
+  5 adds +1 only with the same positive futures confirmation. Yahoo TNX values
+  are percentage yields: 4.00 to 4.05 means +5 basis points, not +5%.
+- Totals >=4 are `Favorable`, >=2 `Assez favorable`, <=-4 `Défavorable`, <=-2
+  `Assez défavorable`, otherwise `Mitigé`. Positive labels require both futures
+  up at least 0.10%. `Favorable` additionally requires all five inputs, VIX below
+  25 and a VIX increase below 10%; otherwise positive totals are capped at
+  `Assez favorable`. Conflicting directions can therefore remain `Mitigé`.
+
+Both equity futures and VIX are required; otherwise the label is `Indisponible`.
+Missing optional inputs are explicitly marked and not assigned neutral points.
+Futures and Brent older than 90 minutes are excluded. During the US cash
+session VIX/TNX must be dated today and no older than 90 minutes. Before opening,
+the preceding weekday's close is accepted and timestamped; after closing,
+today's observations from 15:00 New York onward are accepted (14:45 for TNX,
+whose last Yahoo tick can be just before 15:00). Weekend readings
+are unavailable. There is no exchange holiday calendar: stale holiday quotes
+can make the barometer unavailable rather than implying a live signal. The
+report distinguishes premarket and after-hours context and shows every input's
+timestamp. VIX measures expected volatility, not a directional forecast
+([Cboe](https://www.cboe.com/tradable_products/vix/faqs)); oil and rate effects
+remain context-dependent, which is why they carry smaller weights.
+
+The macro calendar queries Yahoo's internal JSON visualization endpoint for US
+events from today through the next 21 days, following pagination instead of
+scraping the default HTML calendar page. Both the report and app calendar use
+the same short selection: headline PPI MoM, headline CPI MoM, monthly PCE,
+GDP, employment/NFP and the FOMC rate decision. Variants are grouped by
+release/time. Annual/core CPI/PPI rows, weekly jobless claims, energy inventories,
+housing, retail and activity surveys are omitted. An annual/core PPI alone is
+never relabelled as headline MoM. The official
+Federal Reserve calendar remains the FOMC source. Dates use New York time with
+daylight-saving adjustment; the heading is "upcoming", not "this week".
+The Gist retains the provider events and country codes for fallback. Old cached
+events without a country are excluded from US highlights, except official FOMC
+events. API errors or malformed pages produce a visible partial-coverage warning.
+Yahoo's endpoint and coverage are not guaranteed; this is not an exhaustive
+calendar of every potentially market-moving release. `/api/stock-data` retains
+raw `macro_events` and adds `macro_highlights` for display. The app uses only
+these highlights with a new browser cache key, so old cached raw lists are not
+reused. The app server must be redeployed/restarted to pick up this filtering;
+the raw Gist need not be rewritten.
+
+CPI/PPI alerts appear below the barometer on the release day and the preceding calendar
+day; FOMC alerts start three calendar days ahead. These windows and displayed
+times use New York/Toronto time, including daylight saving. Alerts remain visible
+without VIX data and do not change any directional score. Once the scheduled time
+has passed, the alert explicitly says the publication and result are unverified;
+it disappears on the following calendar day. No new API call is required.
+
+For a local full-report preview without updating the Gist cache, run
+`go run ./cmd/stock-checker -output /tmp/daily-report-preview.html -no-twitter -no-save-gist`.
+
 The position recap, AI/manual prompts and tweet collection are paused by default,
 including for older Gist configurations. The optional `report` settings
 `show_positions`, `enable_prompts` and `fetch_tweets` can re-enable them.

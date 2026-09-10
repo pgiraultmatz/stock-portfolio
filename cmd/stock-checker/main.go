@@ -70,6 +70,7 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "Timeout for the entire operation")
 	mock := flag.Bool("mock", false, "Use mock data instead of fetching from APIs (for testing report generation)")
 	noTwitter := flag.Bool("no-twitter", false, "Skip Twitter fetching")
+	noSaveGist := flag.Bool("no-save-gist", false, "Generate the full report without updating the Gist fundamentals cache")
 	newsOnly := flag.Bool("news-only", false, "Generate a news-only HTML report without stock quotes, AI calls or Gist writes")
 	twitterOnly := flag.Bool("twitter-only", false, "Fetch tweets and output a standalone analysis prompt (no Yahoo Finance)")
 	checkAlerts := flag.Bool("check-alerts", false, "Check intraday price alerts and write report if any are triggered")
@@ -213,7 +214,7 @@ func main() {
 	}
 
 	// Full report mode
-	if err := runFullReport(ctx, cfg, *outputPath, *promptOutput, *promptHTMLOutput, xGroups, logger); err != nil {
+	if err := runFullReport(ctx, cfg, *outputPath, *promptOutput, *promptHTMLOutput, xGroups, logger, !*noSaveGist); err != nil {
 		logger.Error("analysis failed", "error", err)
 		os.Exit(1)
 	}
@@ -439,7 +440,7 @@ func printStockResult(r *models.StockResult) {
 	fmt.Println()
 }
 
-func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOutput, promptHTMLOutput string, xGroups []ai.XGroupSection, logger *slog.Logger) error {
+func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOutput, promptHTMLOutput string, xGroups []ai.XGroupSection, logger *slog.Logger, saveGist bool) error {
 	logger.Info("starting stock analysis",
 		"stocks", len(cfg.Stocks),
 		"concurrency", cfg.Concurrency,
@@ -479,14 +480,9 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 		return fmt.Errorf("no stocks were successfully analyzed")
 	}
 
-	// Fetch VIX
-	var vixData *report.VIXData
+	// Fetch directional context independently of upcoming macro publications.
 	yahooClient := yahoo.NewClient(cfg.YahooAPI)
-	if vix, err := yahooClient.GetIntradayPrice(ctx, "^VIX"); err != nil {
-		logger.Warn("failed to fetch VIX, continuing without it", "error", err)
-	} else {
-		vixData = report.NewVIXData(vix.CurrentPrice, vix.ChangePercent)
-	}
+	marketBarometer, vixData := collectBarometer(ctx, yahooClient, logger)
 
 	var promptTemplate string
 	if cfg.AI.Enabled {
@@ -575,20 +571,21 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 
 	var yahooEvents []macro.Event
-	if events, err := yahooClient.GetEconomicEvents(ctx); err != nil {
-		logger.Warn("failed to fetch yahoo economic events, continuing without yahoo supplement", "error", err)
-	} else {
-		for _, e := range events {
-			yahooEvents = append(yahooEvents, macro.Event{
-				Name:       e.Name,
-				Date:       e.Date,
-				Category:   "Economic",
-				Source:     e.Source,
-				Importance: "unknown",
-			})
-		}
-		logger.Info("yahoo economic events fetched", "count", len(yahooEvents))
+	events, calendarErr := yahooClient.GetEconomicEvents(ctx)
+	if calendarErr != nil {
+		logger.Warn("Yahoo economic calendar coverage is partial", "error", calendarErr)
 	}
+	for _, e := range events {
+		yahooEvents = append(yahooEvents, macro.Event{
+			Country:    e.Country,
+			Name:       e.Name,
+			Date:       e.Date,
+			Category:   "Economic",
+			Source:     e.Source,
+			Importance: "unknown",
+		})
+	}
+	logger.Info("yahoo economic events fetched", "count", len(yahooEvents))
 
 	var cachedEvents []macro.Event
 	if existing := config.LoadStockData(); existing != nil {
@@ -602,10 +599,10 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 		}
 	}
 	var economicEvents []report.EconomicEventData
-	for _, e := range macroEvents {
+	for _, e := range macro.CalendarHighlights(macroEvents, time.Now(), 21) {
 		economicEvents = append(economicEvents, report.EconomicEventData{
 			Name: e.Name,
-			Date: e.Date.Format("Mon 02 Jan, 15:04"),
+			Date: e.Date.Format("Mon 02 Jan, 15:04 MST"),
 		})
 	}
 	// Generate HTML report
@@ -615,6 +612,11 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 
 	generator.ShowPositions = cfg.Report.ShowPositions
+	generator.Barometer = marketBarometer
+	generator.MacroAlerts = macro.NearbyAlerts(macroEvents, time.Now())
+	if calendarErr != nil {
+		generator.EconomicCalendarWarning = "Calendrier partiel : actualisation Yahoo indisponible, certaines publications peuvent manquer."
+	}
 	htmlReport, err := generator.GenerateWithAI(results, aiAnalysis, manualPrompt, vixData, economicEvents, newsDigest, cryptoDigest)
 	if err != nil {
 		return fmt.Errorf("generating report: %w", err)
@@ -622,7 +624,9 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 
 	// Save fundamentals to Gist so stock-portfolio can read them without re-fetching
 	signals := generator.ExtractSignals(results)
-	if err := config.SaveFundamentals(results, signals, macroEvents); err != nil {
+	if !saveGist {
+		logger.Info("Gist cache update skipped for local preview")
+	} else if err := config.SaveFundamentals(results, signals, macroEvents); err != nil {
 		logger.Warn("failed to save stock data to gist, continuing", "error", err)
 	} else {
 		logger.Info("stock data saved to gist", "macro_events", len(macroEvents))

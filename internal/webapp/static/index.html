@@ -2614,7 +2614,7 @@ async function load() {
 
 // ---- metrics ----
 const METRICS_CACHE_KEY = 'metricsCache';
-const MACRO_EVENTS_CACHE_KEY = 'macroEventsCache';
+const MACRO_EVENTS_CACHE_KEY = 'macroHighlightsCache-v2';
 const METRICS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 async function fetchMetrics() {
@@ -2646,7 +2646,7 @@ async function fetchMacroEvents() {
     const res = await fetch('/api/stock-data');
     if (!res.ok) return;
     const data = await res.json();
-    macroEvents = Array.isArray(data.macro_events) ? data.macro_events : [];
+    macroEvents = Array.isArray(data.macro_highlights) ? data.macro_highlights : [];
     localStorage.setItem(MACRO_EVENTS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: macroEvents }));
     renderCalendar();
   } catch (e) { /* silent */ }

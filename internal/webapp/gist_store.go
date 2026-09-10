@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"stock-portfolio/internal/macro"
 )
 
 const gistUserID = "gist-user"
@@ -31,13 +33,7 @@ type StockFundamentals struct {
 }
 
 // MacroEvent mirrors macro_events entries written by stock-checker.
-type MacroEvent struct {
-	Name       string    `json:"name"`
-	Date       time.Time `json:"date"`
-	Category   string    `json:"category"`
-	Source     string    `json:"source"`
-	Importance string    `json:"importance"`
-}
+type MacroEvent = macro.Event
 
 // StockDataFile mirrors the stock-data.json written by stock-checker.
 type StockDataFile struct {

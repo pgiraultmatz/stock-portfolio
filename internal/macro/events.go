@@ -30,6 +30,7 @@ var (
 
 // Event is a normalized macro event stored in the Gist and rendered in reports.
 type Event struct {
+	Country    string    `json:"country,omitempty"`
 	Name       string    `json:"name"`
 	Date       time.Time `json:"date"`
 	Category   string    `json:"category"`
@@ -43,7 +44,7 @@ func Merge(groups ...[]Event) []Event {
 	var merged []Event
 	for _, group := range groups {
 		for _, event := range group {
-			key := strings.ToLower(event.Category + "|" + event.Name + "|" + event.Date.Format("2006-01-02"))
+			key := strings.ToLower(event.Country + "|" + event.Category + "|" + event.Name + "|" + event.Date.Format("2006-01-02"))
 			if seen[key] {
 				continue
 			}
@@ -51,7 +52,7 @@ func Merge(groups ...[]Event) []Event {
 			merged = append(merged, event)
 		}
 	}
-	sort.Slice(merged, func(i, j int) bool {
+	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].Date.Before(merged[j].Date)
 	})
 	return merged
@@ -62,7 +63,7 @@ func Upcoming(events []Event, now time.Time, days int) []Event {
 	if days <= 0 {
 		days = 21
 	}
-	start := startOfDay(now)
+	start := startOfDay(now.In(easternLocation()))
 	end := start.AddDate(0, 0, days)
 	return filterAndSort(events, start, end)
 }
@@ -75,7 +76,7 @@ func UpcomingOfficialEvents(ctx context.Context, httpClient *http.Client, now ti
 	if days <= 0 {
 		days = 21
 	}
-	start := startOfDay(now)
+	start := startOfDay(now.In(easternLocation()))
 	end := start.AddDate(0, 0, days)
 
 	events, err := fetchFOMCEvents(ctx, httpClient, start.Year())
@@ -164,6 +165,7 @@ func parseFOMCLines(lines []string, year int) []Event {
 		}
 
 		events = append(events, Event{
+			Country:    "US",
 			Name:       name,
 			Date:       time.Date(year, currentMonth, day, 14, 0, 0, 0, easternLocation()),
 			Category:   "FOMC",
@@ -192,13 +194,14 @@ func htmlLines(raw string) []string {
 func filterAndSort(events []Event, start, end time.Time) []Event {
 	filtered := make([]Event, 0, len(events))
 	for _, event := range events {
+		event.Date = event.Date.In(easternLocation())
 		eventDay := startOfDay(event.Date)
 		if eventDay.Before(start) || eventDay.After(end) {
 			continue
 		}
 		filtered = append(filtered, event)
 	}
-	sort.Slice(filtered, func(i, j int) bool {
+	sort.SliceStable(filtered, func(i, j int) bool {
 		return filtered[i].Date.Before(filtered[j].Date)
 	})
 	return filtered

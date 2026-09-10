@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"stock-portfolio/internal/ai"
+	"stock-portfolio/internal/barometer"
+	"stock-portfolio/internal/macro"
 	"stock-portfolio/internal/models"
 	"stock-portfolio/internal/news"
 )
@@ -20,12 +22,15 @@ var templateFS embed.FS
 
 // Generator creates HTML reports from stock analysis results.
 type Generator struct {
-	ShowPositions     bool
-	templates         *template.Template
-	categoryEmojis    map[string]string
-	categoryOrder     map[string]int
-	categoryNarrative map[string]string
-	categoryNarrScore map[string]int
+	Barometer               *barometer.Summary
+	MacroAlerts             []macro.CalendarAlert
+	EconomicCalendarWarning string
+	ShowPositions           bool
+	templates               *template.Template
+	categoryEmojis          map[string]string
+	categoryOrder           map[string]int
+	categoryNarrative       map[string]string
+	categoryNarrScore       map[string]int
 }
 
 // VIXData holds the VIX index data for display at the top of the report.
@@ -40,19 +45,22 @@ type VIXData struct {
 
 // TemplateData contains the data passed to the HTML template.
 type TemplateData struct {
-	Title            string
-	GeneratedAt      string
-	CategoryGroups   []CategoryGroupData
-	TotalStocks      int
-	OversoldCount    int
-	OverboughtCount  int
-	AIAnalysis       *AIAnalysisData
-	ManualPrompt     string
-	VIX              *VIXData
-	EarningsCalendar []EarningsEventData
-	EconomicEvents   []EconomicEventData
-	News             *news.Digest
-	CryptoNews       *news.Digest
+	Barometer               *barometer.Summary
+	MacroAlerts             []macro.CalendarAlert
+	EconomicCalendarWarning string
+	Title                   string
+	GeneratedAt             string
+	CategoryGroups          []CategoryGroupData
+	TotalStocks             int
+	OversoldCount           int
+	OverboughtCount         int
+	AIAnalysis              *AIAnalysisData
+	ManualPrompt            string
+	VIX                     *VIXData
+	EarningsCalendar        []EarningsEventData
+	EconomicEvents          []EconomicEventData
+	News                    *news.Digest
+	CryptoNews              *news.Digest
 }
 
 // EconomicEventData represents a macro economic event for the template.
@@ -251,6 +259,9 @@ func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai
 
 	data.VIX = vix
 	data.EconomicEvents = economicEvents
+	data.EconomicCalendarWarning = g.EconomicCalendarWarning
+	data.MacroAlerts = g.MacroAlerts
+	data.Barometer = g.Barometer
 	if len(newsDigests) > 0 {
 		data.News = newsDigests[0]
 		if len(results) == 0 && data.News != nil {

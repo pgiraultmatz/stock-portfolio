@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"stock-portfolio/internal/chartcalc"
+	"stock-portfolio/internal/macro"
 
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
@@ -3985,8 +3986,15 @@ func (s *Server) getStockData(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no data available", http.StatusNotFound)
 		return
 	}
+	highlights := macro.CalendarHighlights(data.MacroEvents, time.Now(), 21)
+	if highlights == nil {
+		highlights = []macro.Event{}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	json.NewEncoder(w).Encode(struct {
+		*StockDataFile
+		MacroHighlights []macro.Event `json:"macro_highlights"`
+	}{data, highlights})
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, _ *http.Request) {
