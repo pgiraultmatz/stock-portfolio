@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1131,6 +1132,14 @@ func chartRangeCutoff(lastTS int64, displayRange string) int64 {
 }
 
 func fetchYahooChart(ctx context.Context, symbol, rng, interval string) (ChartResponse, error) {
+	return fetchYahooChartWithParams(ctx, symbol, "range="+url.QueryEscape(rng), interval)
+}
+
+func fetchYahooChartPeriod(ctx context.Context, symbol string, start, end time.Time, interval string) (ChartResponse, error) {
+	return fetchYahooChartWithParams(ctx, symbol, "period1="+strconv.FormatInt(start.Unix(), 10)+"&period2="+strconv.FormatInt(end.Unix(), 10), interval)
+}
+
+func fetchYahooChartWithParams(ctx context.Context, symbol, window, interval string) (ChartResponse, error) {
 	type chartResp struct {
 		Chart struct {
 			Result []struct {
@@ -1154,7 +1163,7 @@ func fetchYahooChart(ctx context.Context, symbol, rng, interval string) (ChartRe
 	}
 
 	u := "https://query2.finance.yahoo.com/v8/finance/chart/" + url.PathEscape(symbol) +
-		"?range=" + url.QueryEscape(rng) + "&interval=" + url.QueryEscape(interval)
+		"?" + window + "&interval=" + url.QueryEscape(interval)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return ChartResponse{}, err
@@ -5236,6 +5245,8 @@ func (s *Server) routes() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+
+	protected.HandleFunc("/api/btc-cycles", s.getBTCCycles)
 
 	protected.HandleFunc("/api/stock-data", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {

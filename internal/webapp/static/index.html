@@ -492,6 +492,21 @@
     .charts-view { max-width: 1480px; margin: 0 auto; padding: 14px 0 34px; }
     .charts-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
     .charts-main { min-width: 0; }
+    .btc-mode-tabs { display: flex; gap: 0; margin-bottom: 12px; }
+    .btc-mode-tabs[hidden], #btc-cycle-tools[hidden] { display: none; }
+    .btc-mode-tabs button { border: 1px solid #30363d; padding: 7px 14px; background: #0d1117; color: #8b949e; font: inherit; font-size: 12px; cursor: pointer; }
+    .btc-mode-tabs button[aria-selected="true"] { background: #163327; color: #7ee787; border-color: #38844e; }
+    .btc-cycle-controls { display: flex; flex-wrap: wrap; gap: 10px; padding: 0 0 12px; border-bottom: 1px solid #21262d; }
+    .btc-cycle-controls label { display: flex; flex-direction: column; gap: 4px; color: #8b949e; font-size: 11px; min-width: 0; }
+    .btc-cycle-controls input, .btc-cycle-controls select { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 7px; font-size: 12px; max-width: 100%; color-scheme: dark; }
+    .btc-cycle-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; padding: 12px 0; font-size: 12px; color: #8b949e; }
+    .btc-cycle-summary strong { display: block; font-size: 15px; color: #e6edf3; font-weight: 600; }
+    .btc-cycle-note { color: #d29922; font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
+    .btc-cycle-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; padding: 8px 0; }
+    .btc-cycle-validation { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+    .btc-cycle-validation th, .btc-cycle-validation td { text-align: right; padding: 6px; border-bottom: 1px solid #21262d; }
+    .btc-cycle-validation th:first-child, .btc-cycle-validation td:first-child { text-align: left; }
+    @media(max-width:720px) { .btc-cycle-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } .btc-cycle-controls label { flex: 1 1 135px; } }
     .charts-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: nowrap; }
     .charts-toolbar .search-wrap { flex: 1 1 260px; max-width: none; width: 100%; min-width: 180px; }
     .charts-toolbar select, .charts-toolbar .charts-toggle, .charts-toolbar .btn { flex: 0 0 auto; white-space: nowrap; }
@@ -526,7 +541,7 @@
     .charts-setup-detail { color: #8b949e; font-size: 11px; line-height: 1.45; }
     .charts-outcome { color: #8b949e; font-size: 11px; line-height: 1.45; }
     .charts-outcome strong { color: #c9d1d9; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
-    .charts-canvas-wrap { position: relative; width: 100%; height: 900px; }
+    .charts-canvas-wrap { position: relative; width: 100%; height: 1050px; }
     #charts-canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
     .charts-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #6e7681; font-size: 13px; text-align: center; pointer-events: none; }
     .charts-watchlist { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; position: sticky; top: 110px; max-height: calc(100vh - 132px); display: flex; flex-direction: column; }
@@ -559,7 +574,7 @@
       .charts-toolbar .search-wrap { flex-basis: 100%; }
       .charts-analysis { grid-template-columns: 1fr; }
       .charts-setup { grid-template-columns: 1fr; }
-      .charts-canvas-wrap { height: 760px; }
+      .charts-canvas-wrap { height: 850px; }
       .charts-watchlist { position: static; max-height: none; }
     }
 
@@ -899,12 +914,27 @@
           <button id="charts-fib-toggle" class="charts-toggle active" onclick="toggleChartFibs()" title="Toggle Fibonacci retracements">Fib</button>
           <button class="btn btn-primary" onclick="loadChart({ refresh: true })">Load</button>
         </div>
+        <div id="btc-mode-tabs" class="btc-mode-tabs" role="tablist" aria-label="Mode de graphique" hidden>
+          <button type="button" role="tab" aria-selected="true" onclick="setBTCChartMode(false)">Technique</button>
+          <button type="button" role="tab" aria-selected="false" onclick="setBTCChartMode(true)">Cycles BTC</button>
+        </div>
         <div class="charts-panel">
           <div class="charts-head">
             <div class="charts-title" id="charts-title">BTC-USD</div>
             <div class="charts-meta" id="charts-meta">No chart loaded</div>
           </div>
           <div class="charts-analysis" id="charts-analysis"></div>
+          <div id="btc-cycle-tools" hidden>
+            <div class="btc-cycle-controls">
+              <label>Comparaison<select id="btc-cycle-preset" onchange="selectBTCCyclePreset()"><option value="current">2018 / 2022</option><option value="historical">2015 / 2018</option></select></label>
+              <label>Ancrage de référence<input type="date" id="btc-cycle-reference" value="2018-12-15" onchange="loadChart()"></label>
+              <label>Ancrage observé<input type="date" id="btc-cycle-target" value="2022-11-21" onchange="loadChart()"></label>
+              <label>Observation au (UTC)<input type="date" id="btc-cycle-asof" onchange="loadChart()"></label>
+              <label>Projection<select id="btc-cycle-horizon" onchange="loadChart()"><option value="180">180 jours</option><option value="365" selected>365 jours</option><option value="540">540 jours</option><option value="730">730 jours</option></select></label>
+            </div>
+            <div id="btc-cycle-summary" aria-live="polite"></div>
+            <div class="btc-cycle-legend"><span style="color:#6e7681">Cycle précédent réel</span><span style="color:#e6edf3">Cycle actuel observé</span><span style="color:#56d4dd">Cycle précédent recalé</span><span style="color:#e3b341">Projection cycle 2018–2022</span><span style="color:#f0883e">Projection cycle 2022–2026</span></div>
+          </div>
           <div class="charts-canvas-wrap">
             <canvas id="charts-canvas"></canvas>
             <div class="charts-empty" id="charts-empty">Open Charts to load historical candles from Yahoo Finance.</div>
@@ -1372,6 +1402,7 @@ function toEmoji(code) {
 
 // ---- charts ----
 let chartData = null;
+let chartLoadID = 0;
 let chartLoadedOnce = false;
 let chartHover = null;
 let chartFrame = null;
@@ -1651,6 +1682,7 @@ function selectChartSymbol(ticker) {
 }
 
 async function loadChart(options = {}) {
+  const loadID = ++chartLoadID;
   const symbolEl = document.getElementById('charts-symbol');
   const rangeEl = document.getElementById('charts-range');
   const intervalEl = document.getElementById('charts-interval');
@@ -1668,6 +1700,9 @@ async function loadChart(options = {}) {
   localStorage.setItem('chartLastSymbol', symbol);
   chartHover = null;
   document.getElementById('charts-title').textContent = symbol;
+  if (syncBTCChartMode(symbol)) {
+    return loadBTCCycle(options);
+  }
   if (meta) meta.textContent = 'Loading…';
   if (empty) empty.style.display = 'grid';
   try {
@@ -1680,16 +1715,49 @@ async function loadChart(options = {}) {
     if (options.refresh) params.set('refresh', '1');
     const res = await fetch(`/api/charts?${params.toString()}`);
     if (!res.ok) throw new Error(await res.text());
-    chartData = await res.json();
+    const loaded = await res.json();
+    if (loadID !== chartLoadID) return;
+    chartData = loaded;
     renderChartsWatchlist();
     drawChart(chartData);
     if (options.refresh) fetchQuotes(true);
   } catch (err) {
+    if (loadID !== chartLoadID) return;
     if (meta) meta.textContent = `Load failed${err && err.message ? `: ${err.message.trim()}` : ''}`;
   }
 }
 
+function drawChartHalfMonthPivots(ctx, candles, x, pad, priceH) {
+  if (!candles.length) return;
+  const byDate = new Map(candles.map((c, i) => [new Date(c.time * 1000).toISOString().slice(0, 10), i]));
+  const firstDate = new Date(candles[0].time * 1000);
+  const lastDate = new Date(candles[candles.length - 1].time * 1000);
+  let cursor = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 14));
+  if (cursor.getTime() / 1000 < candles[0].time) cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  while (cursor.getTime() / 1000 < candles[candles.length - 1].time) {
+    const next = new Date(cursor);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const startKey = cursor.toISOString().slice(0, 10);
+    const endKey = next.toISOString().slice(0, 10);
+    const startIndex = byDate.get(startKey) ?? candles.findIndex(c => c.time >= cursor.getTime() / 1000);
+    const endIndex = byDate.get(endKey) ?? candles.findIndex(c => c.time >= next.getTime() / 1000);
+    if (startIndex >= 0 && endIndex > startIndex) {
+      const startClose = candles[startIndex].close;
+      const endClose = candles[Math.min(endIndex, candles.length - 1)].close;
+      const bullish = endClose >= startClose;
+      ctx.fillStyle = bullish ? 'rgba(63,185,80,.10)' : 'rgba(248,81,73,.10)';
+      ctx.fillRect(x(startIndex), pad.top, Math.max(1, x(Math.min(endIndex, candles.length - 1)) - x(startIndex)), priceH);
+      ctx.strokeStyle = bullish ? 'rgba(63,185,80,.42)' : 'rgba(248,81,73,.42)';
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(x(startIndex), pad.top); ctx.lineTo(x(startIndex), pad.top + priceH); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    cursor = next;
+  }
+}
+
 function drawChart(data) {
+  if (chartCycleMode) { drawBTCCycle(); return; }
   const canvas = document.getElementById('charts-canvas');
   const empty = document.getElementById('charts-empty');
   const meta = document.getElementById('charts-meta');
@@ -1732,9 +1800,12 @@ function drawChart(data) {
   const fibPrices = chartShowFibs
     ? (data.fibs || []).flatMap(f => (f.levels || []).map(l => l.price).filter(Number.isFinite))
     : [];
-  const min = Math.min(...candles.map(c => c.low), ...fibPrices);
-  const max = Math.max(...candles.map(c => c.high), ...fibPrices);
-  const span = Math.max(0.000001, max - min);
+  const priceMin = Math.min(...candles.map(c => c.low), ...fibPrices);
+  const priceMax = Math.max(...candles.map(c => c.high), ...fibPrices);
+  const priceMargin = Math.max(priceMax - priceMin, Math.abs(priceMax) * 0.01, Number.EPSILON) * 0.10;
+  const min = priceMin - priceMargin;
+  const max = priceMax + priceMargin;
+  const span = max - min;
   const y = v => pad.top + (max - v) / span * priceH;
   const x = i => pad.left + (candles.length === 1 ? chartW / 2 : i / (candles.length - 1) * chartW);
   chartFrame = {
@@ -5298,5 +5369,6 @@ function renderYearSection(year, months, isCurrent) {
   </div>`;
 }
 </script>
+<script src="/btc-cycles.js"></script>
 </body>
 </html>
