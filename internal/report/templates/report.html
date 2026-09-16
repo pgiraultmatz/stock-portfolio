@@ -13,9 +13,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-s
 .header .stats{display:flex;justify-content:center;gap:16px;margin-top:16px;flex-wrap:wrap}
 .header .stat{background:rgba(255,255,255,0.15);padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500}
 .market-barometer{padding:16px 24px;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}
-.barometer-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px 20px;flex-wrap:wrap}
-.barometer-heading h2{font-size:16px;font-weight:600}
-.barometer-label{font-size:18px;font-weight:700}
+.barometer-heading{width:100%;padding-bottom:8px}
+.barometer-heading td{vertical-align:middle}
+.barometer-heading h2{font-size:16px;font-weight:600;margin:0;padding:0}
+.barometer-heading .status-cell{text-align:right;padding-left:24px;white-space:nowrap}
+.barometer-label{display:inline-block;font-size:16px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
 .barometer-context{font-size:12px;color:#57606a;margin:4px 0 10px}
 .barometer-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
 .barometer-table td{padding:8px 0;vertical-align:top}
@@ -116,10 +118,12 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
 
         {{if .Barometer}}
         <section class="market-barometer" aria-label="Baromètre actions US">
-            <div class="barometer-heading">
-                <h2>Baromètre actions US</h2>
-                <span class="barometer-label {{.Barometer.Class}}">{{.Barometer.Label}}</span>
-            </div>
+            <table class="barometer-heading" role="presentation">
+                <tr>
+                    <td><h2>Baromètre actions US</h2></td>
+                    <td class="status-cell"><span class="barometer-label {{.Barometer.Class}}">{{.Barometer.Label}}</span></td>
+                </tr>
+            </table>
             <p class="barometer-context">{{.Barometer.Context}}</p>
             <table class="barometer-table" aria-label="Facteurs de marché">
                 <tbody>
