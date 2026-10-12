@@ -195,6 +195,61 @@ timestamp. VIX measures expected volatility, not a directional forecast
 ([Cboe](https://www.cboe.com/tradable_products/vix/faqs)); oil and rate effects
 remain context-dependent, which is why they carry smaller weights.
 
+The daily HTML report starts with a short deterministic synthesis containing
+the main barometer and supplemental **AI / Semis**, weekday and monthly context,
+followed by the main barometer's factors. Supplemental context appears only in
+the synthesis and never adds points to the main barometer or changes its labels:
+
+- AI / Semis reuses the barometer's `NQ=F` quote and fetches SOXX once. It is
+  `Favorable` when both rise at least 0.10%, `Défavorable` when both fall at
+  least 0.10%, and `Neutre` otherwise. Missing/stale quotes give `Indisponible`.
+  SOXX follows the existing cash-market freshness rules, including a timestamped
+  prior weekday close before opening; the futures retain their 90-minute rule.
+- History uses the Nasdaq 100 index (`^NDX`, not a futures roll series) and the
+  SOXX ETF. One daily OHLC request per instrument covers the preceding 16 years,
+  independently of the configured technical-analysis range/interval. Returns
+  use Yahoo's split-adjusted prices, without reinvested dividends. Requests have
+  eight-second deadlines and failures do not stop report generation. No new API
+  key, Gist fields, configuration or workflow changes are needed.
+- The weekday backtest uses the eight latest valid occurrences of the current
+  New York weekday, strictly before today's date even when run after closing.
+  Close-to-Close uses the immediately preceding actual trading session, not
+  the preceding occurrence of the same weekday. It calculates green/red/unchanged
+  counts, percentage positive (unchanged sessions remain in the denominator),
+  mean and median Close-to-Close, and mean Open-to-Close. Missing opens reduce
+  only the intraday sample count. Missing closes are never bridged.
+  Fewer than eight valid observations leave the bias unavailable. Weekends show
+  `Non applicable — hors séance`, without substituting the next Monday.
+- Seasonality uses only the Nasdaq 100 index, taking the 15 latest completed occurrences of the current month,
+  accepting 10–14 when fewer are available. Fewer than ten leave the bias
+  unavailable. Each return compares the month's final close with the preceding
+  month's final close. The current month and incomplete months are excluded;
+  observations before and after each month establish its coverage. It calculates
+  positive/negative/unchanged counts, percentage positive, mean, median,
+  and best/worst return with its year. Historical holidays are represented by
+  the absence of a trading session, without fabricating bars.
+- Each statistical bias is `Favorable` at >=60% positive with a strictly
+  positive mean and median; `Défavorable` at <=40% positive with a strictly
+  negative mean and median; otherwise `Neutre`. The intraday mean is descriptive.
+  The global weekday directional bias requires the two instruments to agree; missing
+  coverage leaves it unavailable rather than neutral.
+
+The synthesis displays **Baromètre actions US** with its exact original label,
+including `Assez favorable`, `Assez défavorable` or `Mitigé`. There is no separate
+setup indicator. The factors appear below under **Facteurs de marché**, without
+repeating the verdict. The synthesis lists all four readings separately. Qualitative
+conviction is reinforced only by unanimous directional readings, moderate with
+mixed or neutral readings, and limited when supplemental data is insufficient.
+An unavailable main barometer leaves conviction unevaluable. These historical
+statistics are context, not a session prediction or a calibrated probability.
+The report shows the historical biases per instrument and their summary,
+with each instrument's green/red session counts inline on the weekday row in
+the synthesis. AI / Semis variations also appear inline before the sector bias.
+There are no separate sector, weekday or seasonality sections. It omits the
+other detailed statistics and methodology paragraphs. SOXX
+remains in the weekday backtest and AI / Semis confirmation, but does not
+contribute to seasonality. Detailed calculations remain internal.
+
 The macro calendar queries Yahoo's internal JSON visualization endpoint for US
 events from today through the next 21 days, following pagination instead of
 scraping the default HTML calendar page. Both the report and app calendar use

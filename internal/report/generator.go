@@ -22,6 +22,7 @@ var templateFS embed.FS
 
 // Generator creates HTML reports from stock analysis results.
 type Generator struct {
+	MarketContext           *barometer.MarketContext
 	Barometer               *barometer.Summary
 	MacroAlerts             []macro.CalendarAlert
 	EconomicCalendarWarning string
@@ -45,6 +46,7 @@ type VIXData struct {
 
 // TemplateData contains the data passed to the HTML template.
 type TemplateData struct {
+	MarketContext           *barometer.MarketContext
 	Barometer               *barometer.Summary
 	MacroAlerts             []macro.CalendarAlert
 	EconomicCalendarWarning string
@@ -262,6 +264,7 @@ func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai
 	data.EconomicCalendarWarning = g.EconomicCalendarWarning
 	data.MacroAlerts = g.MacroAlerts
 	data.Barometer = g.Barometer
+	data.MarketContext = g.MarketContext
 	if len(newsDigests) > 0 {
 		data.News = newsDigests[0]
 		if len(results) == 0 && data.News != nil {

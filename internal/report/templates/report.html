@@ -25,7 +25,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-s
 .barometer-table td:last-child{text-align:right}
 .barometer-detail{display:block;font-size:11px;color:#656d76;font-weight:400}
 .barometer-coverage{font-size:11px;color:#656d76;margin-top:10px}
-@media(max-width:600px){.market-barometer{padding:14px 16px}.barometer-table td:first-child{width:42%}}
+.market-context{padding:8px 24px;font-size:12px}
+.market-context .barometer-heading{border-collapse:collapse;table-layout:fixed;padding:0;font-size:12px}
+.market-context .barometer-heading td{padding:8px 0;border-bottom:1px solid #eaecef}
+.market-context .barometer-heading td:first-child{width:40%;padding-right:12px}
+.market-context .barometer-heading h2{font-size:12px;font-weight:700}
+.market-context .barometer-label{display:inline;font-size:12px;padding:0;border-radius:0}
+.barometer-conclusion{font-size:12px;margin-top:8px}
+.barometer-counts{font-size:11px;color:#656d76;font-weight:400}
+@media(max-width:600px){.market-barometer{padding:14px 16px}.market-context{padding:8px 16px}.barometer-table td:first-child,.market-context .barometer-heading td:first-child{width:42%}}
 .calendar-section{border-bottom:1px solid #d0d7de;background:#f6f8fa;padding:12px 24px}
 .macro-alerts{padding:12px 24px;border-bottom:1px solid #d0d7de;background:#fff8e6}
 .macro-alert{padding:8px 0;overflow-wrap:anywhere}
@@ -116,15 +124,31 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
             </div>
         </div>
 
+        {{with .MarketContext}}
+        <section class="market-barometer market-context" aria-label="Synthèse du contexte de marché">
+            <table class="barometer-heading" role="presentation"><tr><td><h2>Synthèse</h2></td></tr></table>
+            <table class="barometer-table" aria-label="Synthèse des biais">
+                <tr><td><strong>Baromètre actions US :</strong></td><td><strong class="{{.Barometer.Class}}">{{.Barometer.Label}}</strong></td></tr>
+                <tr><td><strong>AI/Semis :</strong></td><td>{{range .SectorFactors}}<span class="barometer-counts">{{.Name}} : {{.Value}} — </span>{{end}}<strong class="{{.Sector.Class}}">{{.Sector.Label}}</strong></td></tr>
+                <tr><td><strong>{{.Weekday.Title}} :</strong></td><td>{{range .Weekday.Instruments}}{{if .Count}}<span class="barometer-counts">{{.Name}} : {{.Positive}} verts / {{.Negative}} rouges{{if .Flat}} / {{.Flat}} inchangé(s){{end}} — </span>{{end}}{{end}}<strong class="{{.Weekday.Bias.Class}}">{{if .Weekday.Note}}{{.Weekday.Note}}{{else}}{{.Weekday.Bias.Label}}{{end}}</strong></td></tr>
+                <tr><td><strong>{{.Monthly.Title}} :</strong></td><td><strong class="{{.Monthly.Bias.Class}}">{{.Monthly.Bias.Label}}</strong></td></tr>
+            </table>
+            <p class="barometer-conclusion"><strong>Conclusion :</strong> {{.Conclusion}}</p>
+        </section>
+        {{end}}
+
         {{if .Barometer}}
         <section class="market-barometer" aria-label="Baromètre actions US">
             <table class="barometer-heading" role="presentation">
                 <tr>
+                    {{if .MarketContext}}
+                    <td><h2>Facteurs de marché</h2></td>
+                    {{else}}
                     <td><h2>Baromètre actions US</h2></td>
                     <td class="status-cell"><span class="barometer-label {{.Barometer.Class}}">{{.Barometer.Label}}</span></td>
+                    {{end}}
                 </tr>
             </table>
-            <p class="barometer-context">{{.Barometer.Context}}</p>
             <table class="barometer-table" aria-label="Facteurs de marché">
                 <tbody>
                 {{range .Barometer.Factors}}
@@ -135,7 +159,6 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
                 {{end}}
                 </tbody>
             </table>
-            <p class="barometer-coverage">{{.Barometer.Coverage}}</p>
         </section>
         {{end}}
 

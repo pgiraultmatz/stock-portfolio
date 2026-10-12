@@ -482,7 +482,8 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 
 	// Fetch directional context independently of upcoming macro publications.
 	yahooClient := yahoo.NewClient(cfg.YahooAPI)
-	marketBarometer, vixData := collectBarometer(ctx, yahooClient, logger)
+	marketBarometer, vixData, marketQuotes := collectBarometer(ctx, yahooClient, logger)
+	marketContext := collectMarketContext(ctx, yahooClient, marketBarometer, marketQuotes, time.Now(), logger)
 
 	var promptTemplate string
 	if cfg.AI.Enabled {
@@ -613,6 +614,7 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 
 	generator.ShowPositions = cfg.Report.ShowPositions
 	generator.Barometer = marketBarometer
+	generator.MarketContext = marketContext
 	generator.MacroAlerts = macro.NearbyAlerts(macroEvents, time.Now())
 	if calendarErr != nil {
 		generator.EconomicCalendarWarning = "Calendrier partiel : actualisation Yahoo indisponible, certaines publications peuvent manquer."
