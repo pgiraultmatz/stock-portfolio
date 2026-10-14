@@ -195,9 +195,9 @@ timestamp. VIX measures expected volatility, not a directional forecast
 ([Cboe](https://www.cboe.com/tradable_products/vix/faqs)); oil and rate effects
 remain context-dependent, which is why they carry smaller weights.
 
-The daily HTML report starts with a short deterministic synthesis containing
+The daily HTML report starts with nearby macro alerts, then a short deterministic synthesis containing
 the main barometer and supplemental **AI / Semis**, weekday and monthly context,
-followed by the main barometer's factors. Supplemental context appears only in
+followed by the earnings/macro calendars and the main barometer's factors. Supplemental context appears only in
 the synthesis and never adds points to the main barometer or changes its labels:
 
 - AI / Semis reuses the barometer's `NQ=F` quote and fetches SOXX once. It is
@@ -270,7 +270,7 @@ these highlights with a new browser cache key, so old cached raw lists are not
 reused. The app server must be redeployed/restarted to pick up this filtering;
 the raw Gist need not be rewritten.
 
-CPI/PPI alerts appear below the barometer on the release day and the preceding calendar
+CPI/PPI alerts appear before the synthesis on the release day and the preceding calendar
 day; FOMC alerts start three calendar days ahead. These windows and displayed
 times use New York/Toronto time, including daylight saving. Alerts remain visible
 without VIX data and do not change any directional score. Once the scheduled time

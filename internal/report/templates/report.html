@@ -124,6 +124,17 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
             </div>
         </div>
 
+        {{if .MacroAlerts}}
+        <section class="macro-alerts" aria-label="Alertes macro proches">
+            {{range .MacroAlerts}}
+            <div class="macro-alert {{.State}}">
+                <div class="macro-alert-title">{{.Title}}</div>
+                <p class="macro-alert-message">{{.Message}}</p>
+            </div>
+            {{end}}
+        </section>
+        {{end}}
+
         {{with .MarketContext}}
         <section class="market-barometer market-context" aria-label="Synthèse du contexte de marché">
             <table class="barometer-heading" role="presentation"><tr><td><h2>Synthèse</h2></td></tr></table>
@@ -134,42 +145,6 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
                 <tr><td><strong>{{.Monthly.Title}} :</strong></td><td><strong class="{{.Monthly.Bias.Class}}">{{.Monthly.Bias.Label}}</strong></td></tr>
             </table>
             <p class="barometer-conclusion"><strong>Conclusion :</strong> {{.Conclusion}}</p>
-        </section>
-        {{end}}
-
-        {{if .Barometer}}
-        <section class="market-barometer" aria-label="Baromètre actions US">
-            <table class="barometer-heading" role="presentation">
-                <tr>
-                    {{if .MarketContext}}
-                    <td><h2>Facteurs de marché</h2></td>
-                    {{else}}
-                    <td><h2>Baromètre actions US</h2></td>
-                    <td class="status-cell"><span class="barometer-label {{.Barometer.Class}}">{{.Barometer.Label}}</span></td>
-                    {{end}}
-                </tr>
-            </table>
-            <table class="barometer-table" aria-label="Facteurs de marché">
-                <tbody>
-                {{range .Barometer.Factors}}
-                <tr>
-                    <td><strong>{{.Name}}</strong><span class="barometer-detail">{{.AsOf}}</span></td>
-                    <td><strong class="{{.Class}}">{{.Value}}</strong><span class="barometer-detail">{{.Observation}}</span></td>
-                </tr>
-                {{end}}
-                </tbody>
-            </table>
-        </section>
-        {{end}}
-
-        {{if .MacroAlerts}}
-        <section class="macro-alerts" aria-label="Alertes macro proches">
-            {{range .MacroAlerts}}
-            <div class="macro-alert {{.State}}">
-                <div class="macro-alert-title">{{.Title}}</div>
-                <p class="macro-alert-message">{{.Message}}</p>
-            </div>
-            {{end}}
         </section>
         {{end}}
 
@@ -208,6 +183,31 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
         {{end}}
 
         {{if .EconomicCalendarWarning}}<p class="calendar-days-label">{{.EconomicCalendarWarning}}</p>{{end}}
+        {{if .Barometer}}
+        <section class="market-barometer" aria-label="Baromètre actions US">
+            <table class="barometer-heading" role="presentation">
+                <tr>
+                    {{if .MarketContext}}
+                    <td><h2>Facteurs de marché</h2></td>
+                    {{else}}
+                    <td><h2>Baromètre actions US</h2></td>
+                    <td class="status-cell"><span class="barometer-label {{.Barometer.Class}}">{{.Barometer.Label}}</span></td>
+                    {{end}}
+                </tr>
+            </table>
+            <table class="barometer-table" aria-label="Facteurs de marché">
+                <tbody>
+                {{range .Barometer.Factors}}
+                <tr>
+                    <td><strong>{{.Name}}</strong><span class="barometer-detail">{{.AsOf}}</span></td>
+                    <td><strong class="{{.Class}}">{{.Value}}</strong><span class="barometer-detail">{{.Observation}}</span></td>
+                </tr>
+                {{end}}
+                </tbody>
+            </table>
+        </section>
+        {{end}}
+
         {{with .News}}
         <section class="portfolio-news" aria-label="Actualités du portefeuille">
             <h2>Actualités à suivre</h2>

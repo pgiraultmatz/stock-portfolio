@@ -47,7 +47,7 @@ func TestSupplementalContextRendering(t *testing.T) {
 		Mean: 2.4, Median: 2.1, Best: 10, Worst: -12, BestYear: 2020, WorstYear: 2018,
 		Bias: barometer.Bias{Label: "Favorable", Class: "positive"},
 	}
-	content, err := g.GenerateWithAI(nil, nil, "", nil, nil)
+	content, err := g.GenerateWithAI(nil, nil, "", nil, []EconomicEventData{{Name: "CPI US", Date: "14/10 08:30 EDT"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,8 +76,16 @@ func TestSupplementalContextRendering(t *testing.T) {
 		t.Fatal("seasonality must appear only in the synthesis")
 	}
 	raw, _ := g.GenerateWithAI(nil, nil, "", nil, nil)
-	if !strings.Contains(raw, "Nasdaq &lt;100&gt;") || strings.Index(content, "Synthèse") > strings.Index(content, "Baromètre actions US") || strings.Index(content, "Baromètre actions US") > strings.Index(content, "PPI US") {
-		t.Fatal("escaping or section order")
+	if !strings.Contains(raw, "Nasdaq &lt;100&gt;") {
+		t.Fatal("unescaped instrument name")
+	}
+	previous := -1
+	for _, marker := range []string{`class="macro-alerts"`, `aria-label="Synthèse du contexte de marché"`, `class="calendar-section"`, `aria-label="Baromètre actions US"`} {
+		position := strings.Index(content, marker)
+		if position <= previous {
+			t.Fatalf("missing or misplaced section: %s", marker)
+		}
+		previous = position
 	}
 	g.MarketContext = nil
 	content, err = g.GenerateWithAI(nil, nil, "", nil, nil)
@@ -101,8 +109,8 @@ func TestBarometerIndependentOfMacroAlerts(t *testing.T) {
 		if !strings.Contains(content, "Assez favorable") || !strings.Contains(content, "S&amp;P &lt;test&gt;") {
 			t.Fatal("barometer missing or unescaped")
 		}
-		if len(alerts) > 0 && (!strings.Contains(content, "PPI US") || strings.Index(content, `class="market-barometer"`) > strings.Index(content, `class="macro-alerts"`)) {
-			t.Fatal("macro alert should remain below barometer")
+		if len(alerts) > 0 && (!strings.Contains(content, "PPI US") || strings.Index(content, `class="macro-alerts"`) > strings.Index(content, `class="market-barometer"`)) {
+			t.Fatal("macro alert should precede barometer")
 		}
 	}
 	g.Barometer = &barometer.Summary{Label: "Indisponible", Class: "neutral"}
