@@ -116,7 +116,6 @@ func main() {
 	}
 	logger.Info("configuration loaded", "stocks", len(cfg.Stocks), "concurrency", cfg.Concurrency)
 	cfg.AI.Enabled = cfg.AI.Enabled && cfg.Report.EnablePrompts
-	cfg.Twitter.Enabled = cfg.Twitter.Enabled && cfg.Report.FetchTweets
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
@@ -199,9 +198,9 @@ func main() {
 	}
 
 	// Fetch tweets if configured
-	var xGroups []ai.XGroupSection
+	var tweets tweetCollection
 	if !*noTwitter {
-		xGroups = fetchAllXGroups(ctx, cfg, logger)
+		tweets = fetchAllXGroups(ctx, cfg, logger)
 	}
 
 	// Single stock check mode (triggered by -check or -ticker)
@@ -214,7 +213,7 @@ func main() {
 	}
 
 	// Full report mode
-	if err := runFullReport(ctx, cfg, *outputPath, *promptOutput, *promptHTMLOutput, xGroups, logger, !*noSaveGist); err != nil {
+	if err := runFullReport(ctx, cfg, *outputPath, *promptOutput, *promptHTMLOutput, tweets, logger, !*noSaveGist); err != nil {
 		logger.Error("analysis failed", "error", err)
 		os.Exit(1)
 	}
@@ -322,9 +321,6 @@ Microsoft capex guidance Q3 > +40% YoY. Toute la chaîne data center en profite 
 
 	var manualPrompt string
 	if preferences.EnablePrompts {
-		if !preferences.FetchTweets {
-			mockXGroups = nil
-		}
 		var err error
 		manualPrompt, err = ai.BuildPromptFromContent(results, promptTemplate, ai.PromptContext{XGroups: mockXGroups})
 		if err != nil {
@@ -440,7 +436,7 @@ func printStockResult(r *models.StockResult) {
 	fmt.Println()
 }
 
-func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOutput, promptHTMLOutput string, xGroups []ai.XGroupSection, logger *slog.Logger, saveGist bool) error {
+func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOutput, promptHTMLOutput string, tweets tweetCollection, logger *slog.Logger, saveGist bool) error {
 	logger.Info("starting stock analysis",
 		"stocks", len(cfg.Stocks),
 		"concurrency", cfg.Concurrency,
@@ -511,7 +507,7 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	var err error
 	if cfg.AI.Enabled {
 		if cfg.AI.Mode == "manual_prompt" {
-			promptCtx := ai.PromptContext{XGroups: xGroups, News: newsContext}
+			promptCtx := ai.PromptContext{XGroups: tweets.Groups, News: newsContext}
 			if vixData != nil {
 				promptCtx.VIXLine = fmt.Sprintf("- VIX: %s (%s) — %s\n", vixData.Price, vixData.Change, vixData.Level)
 			}
@@ -549,7 +545,7 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 				aiAnalyzer := ai.NewAnalyzer(aiClient, promptTemplate)
 
 				var err error
-				aiAnalysis, err = aiAnalyzer.Analyze(ctx, results, ai.FormatXGroups(xGroups)+newsContext)
+				aiAnalysis, err = aiAnalyzer.Analyze(ctx, results, ai.FormatXGroups(tweets.Groups)+newsContext)
 				if err != nil {
 					logger.Warn("AI analysis failed, continuing without it", "error", err)
 				} else {
@@ -613,6 +609,7 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 
 	generator.ShowPositions = cfg.Report.ShowPositions
+	generator.TwitterAccounts = tweets.Accounts
 	generator.Barometer = marketBarometer
 	generator.MarketContext = marketContext
 	generator.MacroAlerts = macro.NearbyAlerts(macroEvents, time.Now())
@@ -1094,7 +1091,7 @@ func collectAllTechnicalAlerts(ctx context.Context, cfg *config.Config, timefram
 
 // runTwitterPrompt fetches tweets from all xGroups and writes a standalone prompt to promptOutput (or stdout).
 func runTwitterPrompt(ctx context.Context, cfg *config.Config, templatePath string, promptOutput string, logger *slog.Logger) error {
-	groups := fetchAllXGroups(ctx, cfg, logger)
+	groups := fetchAllXGroups(ctx, cfg, logger).Groups
 	if len(groups) == 0 {
 		return fmt.Errorf("no tweets fetched — check xGroups in twitter config")
 	}
@@ -1123,15 +1120,21 @@ func runTwitterPrompt(ctx context.Context, cfg *config.Config, templatePath stri
 	return nil
 }
 
-// fetchAllXGroups fetches tweets for every xGroup defined in the Twitter config.
-func fetchAllXGroups(ctx context.Context, cfg *config.Config, logger *slog.Logger) []ai.XGroupSection {
+type tweetCollection struct {
+	Groups   []ai.XGroupSection
+	Accounts []report.TwitterAccountData
+}
+
+// fetchAllXGroups retains each account's outcome, independently of AI prompts.
+func fetchAllXGroups(ctx context.Context, cfg *config.Config, logger *slog.Logger) tweetCollection {
+	var result tweetCollection
 	if !cfg.Twitter.Enabled {
 		logger.Info("twitter disabled, skipping")
-		return nil
+		return result
 	}
 	if len(cfg.XGroups) == 0 {
 		logger.Warn("twitter enabled but no xGroups configured")
-		return nil
+		return result
 	}
 	logger.Info("fetching tweets", "groups", len(cfg.XGroups))
 
@@ -1140,10 +1143,9 @@ func fetchAllXGroups(ctx context.Context, cfg *config.Config, logger *slog.Logge
 		maxTweets = 4
 	}
 
-	fetcher, err := twitter.NewFetcher(cfg.Twitter.Provider, os.Getenv("TWITTER_BEARER_TOKEN"), cfg.Twitter.NitterInstances)
-	if err != nil {
-		logger.Warn("twitter fetcher init failed, skipping", "error", err)
-		return nil
+	fetcher, initErr := twitter.NewFetcher(cfg.Twitter.Provider, os.Getenv("TWITTER_BEARER_TOKEN"), cfg.Twitter.NitterInstances)
+	if initErr != nil {
+		logger.Warn("twitter fetcher init failed", "error", initErr)
 	}
 
 	delay := time.Duration(cfg.Twitter.RequestDelaySeconds) * time.Second
@@ -1151,29 +1153,43 @@ func fetchAllXGroups(ctx context.Context, cfg *config.Config, logger *slog.Logge
 		delay = 1 * time.Second
 	}
 
-	var result []ai.XGroupSection
 	first := true
 	for _, group := range cfg.XGroups {
 		for _, account := range group.Accounts {
-			account = strings.TrimSpace(account)
+			account = strings.TrimPrefix(strings.TrimSpace(account), "@")
 			if account == "" {
 				continue
 			}
-			if !first {
-				time.Sleep(delay)
+			if !first && initErr == nil && ctx.Err() == nil {
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+				}
 			}
 			first = false
 
-			tweets, err := fetcher.GetRecentTweets(ctx, account, maxTweets)
+			outcome := report.TwitterAccountData{Group: group.Name, Username: account}
+			var tweets []twitter.Tweet
+			err := initErr
+			if err == nil {
+				err = ctx.Err()
+			}
+			if err == nil {
+				tweets, err = fetcher.GetRecentTweets(ctx, account, maxTweets)
+			}
 			if err != nil {
 				logger.Warn("failed to fetch tweets", "user", account, "error", err)
+				outcome.FetchFailed = true
+				result.Accounts = append(result.Accounts, outcome)
 				continue
 			}
 			logger.Info("tweets fetched", "group", group.Name, "user", account, "total", len(tweets))
 			tweets = twitter.FilterRecent(tweets)
+			outcome.Tweets = tweets
+			result.Accounts = append(result.Accounts, outcome)
 			logger.Info("tweets after filter", "group", group.Name, "user", account, "recent", len(tweets))
 			if content := twitter.FormatTweets(account, tweets); content != "" {
-				result = append(result, ai.XGroupSection{Name: group.Name, Accounts: []string{account}, Content: content})
+				result.Groups = append(result.Groups, ai.XGroupSection{Name: group.Name, Accounts: []string{account}, Content: content})
 			}
 		}
 	}

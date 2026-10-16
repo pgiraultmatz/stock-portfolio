@@ -30,8 +30,7 @@
   },
   "report": {
     "show_positions": false,
-    "enable_prompts": false,
-    "fetch_tweets": false
+    "enable_prompts": false
   },
   "crypto_news": {
     "enabled": true,
@@ -52,12 +51,12 @@
     "feeds": []
   },
   "twitter": {
-    "enabled": false,
+    "enabled": true,
     "provider": "nitter",
     "max_tweets": 4,
     "request_delay_seconds": 1,
     "nitter_instances": [
-      "https://xcancel.com",
+      "https://nitter.kareem.one",
       "https://nitter.tiekoetter.com",
       "https://nitter.privacyredirect.com"
     ]

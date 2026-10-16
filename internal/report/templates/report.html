@@ -100,6 +100,8 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
 .portfolio-news .news-priority{font-size:11px;font-weight:700;color:#116329}
 .portfolio-news .news-secondary{color:#57606a}
 .portfolio-news .news-warning{font-size:12px;color:#9a6700;margin:8px 0}
+.tweet{padding:10px 0;border-top:1px solid #eaecef}
+.tweet-text{white-space:pre-wrap;font-size:13px;margin-top:4px}
 @media(max-width:600px){.portfolio-news{padding:14px 16px}}
 .recommendation{padding:10px 0;border-bottom:1px solid #eaecef}
 .action-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;text-transform:uppercase}
@@ -257,6 +259,31 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
                 </tbody>
             </table>
         </div>
+        {{end}}
+
+        {{if .TwitterAccounts}}
+        <section class="portfolio-news" aria-label="Tweets récents">
+            <h2>Tweets récents</h2>
+            <p class="news-meta">Aujourd’hui et hier · Dates en UTC</p>
+            {{range .TwitterAccounts}}
+            <article>
+                <div class="news-meta">{{.Group}}</div>
+                <h3><a href="https://x.com/{{.Username}}" target="_blank" rel="noopener noreferrer">@{{.Username}}</a></h3>
+                {{if .FetchFailed}}
+                <p class="news-warning">Impossible de récupérer les tweets de @{{.Username}}.</p>
+                {{else}}
+                    {{range .Tweets}}
+                    <div class="tweet">
+                        <div class="news-meta">{{.CreatedAt.UTC.Format "02/01/2006 15:04"}}</div>
+                        <p class="tweet-text">{{.Text}}</p>
+                    </div>
+                    {{else}}
+                    <p class="news-description">Aucun tweet récent pour @{{.Username}}.</p>
+                    {{end}}
+                {{end}}
+            </article>
+            {{end}}
+        </section>
         {{end}}
 
         {{if .AIAnalysis}}

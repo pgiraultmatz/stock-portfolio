@@ -15,6 +15,7 @@ import (
 	"stock-portfolio/internal/macro"
 	"stock-portfolio/internal/models"
 	"stock-portfolio/internal/news"
+	"stock-portfolio/internal/twitter"
 )
 
 //go:embed templates/*.html
@@ -27,6 +28,7 @@ type Generator struct {
 	MacroAlerts             []macro.CalendarAlert
 	EconomicCalendarWarning string
 	ShowPositions           bool
+	TwitterAccounts         []TwitterAccountData
 	templates               *template.Template
 	categoryEmojis          map[string]string
 	categoryOrder           map[string]int
@@ -63,6 +65,15 @@ type TemplateData struct {
 	EconomicEvents          []EconomicEventData
 	News                    *news.Digest
 	CryptoNews              *news.Digest
+	TwitterAccounts         []TwitterAccountData
+}
+
+// TwitterAccountData preserves successful and failed account fetches for the report.
+type TwitterAccountData struct {
+	Group       string
+	Username    string
+	Tweets      []twitter.Tweet
+	FetchFailed bool
 }
 
 // EconomicEventData represents a macro economic event for the template.
@@ -265,6 +276,7 @@ func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai
 	data.MacroAlerts = g.MacroAlerts
 	data.Barometer = g.Barometer
 	data.MarketContext = g.MarketContext
+	data.TwitterAccounts = g.TwitterAccounts
 	if len(newsDigests) > 0 {
 		data.News = newsDigests[0]
 		if len(results) == 0 && data.News != nil {

@@ -39,7 +39,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           echo "📊 Generating stock market report..."
-          ./stock-checker -config config.json -output report.html -no-twitter -verbose
+          ./stock-checker -config config.json -output report.html -verbose
           echo "✅ HTML report generated"
 
       - name: Send email report

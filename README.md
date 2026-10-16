@@ -280,11 +280,21 @@ it disappears on the following calendar day. No new API call is required.
 For a local full-report preview without updating the Gist cache, run
 `go run ./cmd/stock-checker -output /tmp/daily-report-preview.html -no-twitter -no-save-gist`.
 
-The position recap, AI/manual prompts and tweet collection are paused by default,
-including for older Gist configurations. The optional `report` settings
-`show_positions`, `enable_prompts` and `fetch_tweets` can re-enable them.
-Prompts and tweets also require their respective `ai.enabled`/`twitter.enabled`
-settings. The daily workflow explicitly skips Twitter and pauses the prompt email.
+The position recap and AI/manual prompts are paused by default. The optional
+`report.show_positions` and `report.enable_prompts` settings can re-enable them;
+prompts also require `ai.enabled`. The prompt email remains paused.
+
+Tweets are fetched by default for accounts in `xGroups` and displayed directly in
+the daily HTML report, independently of AI/manual prompts. `twitter.enabled` is
+the only configuration switch (default: `true`); set it to `false` or pass
+`-no-twitter` to skip collection. The dedicated `daily-report-no-twitter.yml`
+workflow continues to skip tweets.
+
+The report displays an explicit message for each account whose tweets could not
+be fetched, and a separate message when collection succeeds but no recent tweets
+remain after filtering. Recent means today or yesterday in UTC. Successful tweets
+still appear if other accounts fail. Nitter instances remain best-effort;
+configured instances are tried first, followed by environment and default fallbacks.
 
 The stock-checker report includes recent Yahoo Finance RSS articles without an
 API key. Article selection prioritizes portfolio companies, then watchlist

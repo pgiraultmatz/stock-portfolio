@@ -88,6 +88,7 @@ func resolveNitterInstances(configured []string) []string {
 		add(envInstances)
 	}
 	add([]string{
+		"https://nitter.kareem.one",
 		"https://xcancel.com",
 		"https://nitter.tiekoetter.com",
 		"https://nitter.privacyredirect.com",
@@ -97,7 +98,6 @@ func resolveNitterInstances(configured []string) []string {
 		"https://nitter.space",
 		"https://nuku.trabun.org",
 		"https://nitter.catsarch.com",
-		"https://nitter.kareem.one",
 	})
 	return instances
 }

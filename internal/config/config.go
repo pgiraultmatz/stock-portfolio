@@ -33,12 +33,10 @@ type Config struct {
 	Concurrency int               `json:"concurrency"`
 }
 
-// ReportConfig enables optional sections and collection in the daily report.
-// These are opt-in even when older configurations still enable AI or Twitter.
+// ReportConfig enables optional sections in the daily report.
 type ReportConfig struct {
 	ShowPositions bool `json:"show_positions"`
 	EnablePrompts bool `json:"enable_prompts"`
-	FetchTweets   bool `json:"fetch_tweets"`
 }
 
 // AIConfig holds AI/Anthropic API configuration.
@@ -85,6 +83,7 @@ type YahooAPIConfig struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return &Config{
+		Twitter:    TwitterConfig{Enabled: true},
 		CryptoNews: news.DefaultCryptoConfig(),
 		News:       news.Config{Enabled: true, MaxArticles: 12, MaxPerStock: 2, LookbackHours: 72},
 		YahooAPI: YahooAPIConfig{
