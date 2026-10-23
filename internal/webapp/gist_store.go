@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"stock-portfolio/internal/macro"
+	"stock-portfolio/internal/models"
 )
 
 const gistUserID = "gist-user"
@@ -21,15 +22,16 @@ const githubGistAPI = "https://api.github.com/gists/"
 // Auth and session methods are stubs — the server bypasses requireAuth in gist mode.
 // StockFundamentals holds pre-calculated data written by stock-checker.
 type StockFundamentals struct {
-	RSI           float64 `json:"rsi,omitempty"`
-	TargetPrice   float64 `json:"target_price,omitempty"`
-	TargetPct     float64 `json:"target_pct,omitempty"`
-	PEGRatio      float64 `json:"peg_ratio,omitempty"`
-	PSGRatio      float64 `json:"psg_ratio,omitempty"`
-	EVGrossProfit float64 `json:"ev_gross_profit,omitempty"`
-	NextEarnings  string  `json:"next_earnings,omitempty"`
-	Signal        string  `json:"signal,omitempty"`
-	SignalNote    string  `json:"signal_note,omitempty"`
+	Evaluation    *models.Evaluation `json:"evaluation,omitempty"`
+	RSI           float64            `json:"rsi,omitempty"`
+	TargetPrice   float64            `json:"target_price,omitempty"`
+	TargetPct     float64            `json:"target_pct,omitempty"`
+	PEGRatio      float64            `json:"peg_ratio,omitempty"`
+	PSGRatio      float64            `json:"psg_ratio,omitempty"`
+	EVGrossProfit float64            `json:"ev_gross_profit,omitempty"`
+	NextEarnings  string             `json:"next_earnings,omitempty"`
+	Signal        string             `json:"signal,omitempty"`
+	SignalNote    string             `json:"signal_note,omitempty"`
 }
 
 // MacroEvent mirrors macro_events entries written by stock-checker.

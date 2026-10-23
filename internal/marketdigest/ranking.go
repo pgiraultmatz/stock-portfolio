@@ -7,10 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"stock-portfolio/internal/models"
 	"stock-portfolio/internal/technicalalerts"
 )
 
 type RankingOptions struct {
+	Evaluations  map[string]models.Evaluation
+	Stocks       []models.Stock
 	Limit        int
 	Now          time.Time
 	Financials   map[string]FinancialContext
@@ -22,8 +25,8 @@ func rankingOptions(options []RankingOptions) RankingOptions {
 	if len(options) > 0 {
 		result = options[0]
 	}
-	if result.Limit != 5 {
-		result.Limit = 3
+	if result.Limit != 3 && result.Limit != 5 && result.Limit != 10 {
+		result.Limit = 10
 	}
 	if result.Now.IsZero() {
 		result.Now = time.Now()
@@ -202,6 +205,10 @@ func writeTopSection(sb *strings.Builder, groups []tickerGroup, timeframe string
 }
 
 func writeTopSectionMulti(sb *strings.Builder, groups []multiTickerGroup, options RankingOptions) {
+	if options.Evaluations != nil {
+		writeEvaluationTopSection(sb, options)
+		return
+	}
 	buys, sells := rankDecisions(groups, options)
 	sb.WriteString("<h3>Priorités à examiner</h3>\n<table class=\"top-picks\">\n")
 	fmt.Fprintf(sb, "<tr><th>Top %d achats / renforcements</th><th>Top %d allègements / ventes</th></tr><tr><td>", options.Limit, options.Limit)

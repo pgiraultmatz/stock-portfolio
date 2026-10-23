@@ -4,31 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"stock-portfolio/internal/models"
 	"time"
 )
 
 type StockMetrics struct {
-	RSI           float64 `json:"rsi"`
-	RSILabel      string  `json:"rsiLabel"`
-	RSIClass      string  `json:"rsiClass"`
-	TargetPrice   float64 `json:"targetPrice"`
-	TargetPct     float64 `json:"targetPct"`
-	PEGRatio      float64 `json:"pegRatio"`
-	PEGLabel      string  `json:"pegLabel"`
-	PEGClass      string  `json:"pegClass"`
-	PSGRatio      float64 `json:"psgRatio"`
-	PSGLabel      string  `json:"psgLabel"`
-	PSGClass      string  `json:"psgClass"`
-	EVGPRatio     float64 `json:"evgpRatio"`
-	EVGPLabel     string  `json:"evgpLabel"`
-	EVGPClass     string  `json:"evgpClass"`
-	Earnings      string  `json:"earnings"`
-	EarningsDate  string  `json:"earningsDate,omitempty"` // ISO 2006-01-02
-	EarningsClass string  `json:"earningsClass"`
-	Signal        string  `json:"signal"`
-	SignalClass   string  `json:"signalClass"`
-	SignalNote    string  `json:"signalNote"`
-	UpdatedAt     string  `json:"updatedAt,omitempty"`
+	Evaluation    *models.Evaluation `json:"evaluation,omitempty"`
+	RSI           float64            `json:"rsi"`
+	RSILabel      string             `json:"rsiLabel"`
+	RSIClass      string             `json:"rsiClass"`
+	TargetPrice   float64            `json:"targetPrice"`
+	TargetPct     float64            `json:"targetPct"`
+	PEGRatio      float64            `json:"pegRatio"`
+	PEGLabel      string             `json:"pegLabel"`
+	PEGClass      string             `json:"pegClass"`
+	PSGRatio      float64            `json:"psgRatio"`
+	PSGLabel      string             `json:"psgLabel"`
+	PSGClass      string             `json:"psgClass"`
+	EVGPRatio     float64            `json:"evgpRatio"`
+	EVGPLabel     string             `json:"evgpLabel"`
+	EVGPClass     string             `json:"evgpClass"`
+	Earnings      string             `json:"earnings"`
+	EarningsDate  string             `json:"earningsDate,omitempty"` // ISO 2006-01-02
+	EarningsClass string             `json:"earningsClass"`
+	Signal        string             `json:"signal"`
+	SignalClass   string             `json:"signalClass"`
+	SignalNote    string             `json:"signalNote"`
+	UpdatedAt     string             `json:"updatedAt,omitempty"`
 }
 
 // ---- Label helpers --------------------------------------------------------
@@ -185,14 +187,20 @@ func (s *Server) getMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 		earningsDisplay, earningsCls := earningsInfo(f.NextEarnings)
 
+		signal, note := f.Evaluation.Badge()
+		evaluation := f.Evaluation
+		if !evaluation.Current() {
+			evaluation = nil
+		}
 		results[ticker] = StockMetrics{
-			RSI: f.RSI, RSILabel: rsiLbl, RSIClass: rsiCls,
+			Evaluation: evaluation,
+			RSI:        f.RSI, RSILabel: rsiLbl, RSIClass: rsiCls,
 			TargetPrice: f.TargetPrice, TargetPct: f.TargetPct,
 			PEGRatio: f.PEGRatio, PEGLabel: pegLbl, PEGClass: pegCls,
 			PSGRatio: f.PSGRatio, PSGLabel: psgLbl, PSGClass: psgCls,
 			EVGPRatio: f.EVGrossProfit, EVGPLabel: evgpLbl, EVGPClass: evgpCls,
 			Earnings: earningsDisplay, EarningsDate: f.NextEarnings, EarningsClass: earningsCls,
-			Signal: f.Signal, SignalClass: signalClass(f.Signal), SignalNote: f.SignalNote,
+			Signal: signal, SignalClass: models.SignalClass(signal), SignalNote: note,
 			UpdatedAt: updatedAt,
 		}
 	}

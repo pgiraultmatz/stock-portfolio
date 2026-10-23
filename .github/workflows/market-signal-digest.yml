@@ -6,7 +6,7 @@ on:
       timeframe:
         description: Signal timeframe to check
         required: true
-        default: daily
+        default: both
         type: choice
         options:
           - daily

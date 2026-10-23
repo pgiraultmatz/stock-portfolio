@@ -69,7 +69,7 @@ func TestFinancialDefaultTop50DoesNotChangeTechnicalLimit(t *testing.T) {
 	if !strings.Contains(out, "Top 50 valorisation") || strings.Count(out, "<strong>STOCK") != 50 {
 		t.Fatal("rendered report truncated financial top")
 	}
-	if rankingOptions(nil).Limit != 3 {
+	if rankingOptions(nil).Limit != 10 {
 		t.Fatal("technical default changed")
 	}
 	for ticker := range options.Financials {

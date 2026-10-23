@@ -409,40 +409,56 @@ func calcMACD(candles []chartcalc.Candle) []macdPoint {
 	return points
 }
 
+// Series contains source metadata used to identify unfinished trading periods.
+type Series struct {
+	Candles    []chartcalc.Candle
+	QuoteType  string
+	Timezone   string
+	SessionEnd time.Time
+}
+
 func (c *Client) fetchCandles(ctx context.Context, ticker string, timeframe Timeframe) ([]chartcalc.Candle, error) {
+	series, err := c.FetchSeries(ctx, ticker, timeframe)
+	return series.Candles, err
+}
+
+func (c *Client) FetchSeries(ctx context.Context, ticker string, timeframe Timeframe) (Series, error) {
 	u := c.chartURL(ticker, timeframe)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return Series{}, err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return Series{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("yahoo chart status %d", resp.StatusCode)
+		return Series{}, fmt.Errorf("yahoo chart status %d", resp.StatusCode)
 	}
 
 	var payload yahooChartResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
+		return Series{}, err
 	}
 	if len(payload.Chart.Result) == 0 {
-		return nil, fmt.Errorf("no chart data")
+		return Series{}, fmt.Errorf("no chart data")
 	}
 	result := payload.Chart.Result[0]
 	if len(result.Indicators.Quote) == 0 {
-		return nil, fmt.Errorf("no quote data")
+		return Series{}, fmt.Errorf("no quote data")
 	}
 	quote := result.Indicators.Quote[0]
-	n := minInt(len(result.Timestamp), len(quote.Close))
+	n := min(len(result.Timestamp), len(quote.Close), len(quote.Open), len(quote.High), len(quote.Low))
+	if n != len(result.Timestamp) {
+		return Series{}, fmt.Errorf("misaligned OHLC data")
+	}
 	candles := make([]chartcalc.Candle, 0, n)
 	for i := 0; i < n; i++ {
 		if quote.Open[i] == nil || quote.High[i] == nil || quote.Low[i] == nil || quote.Close[i] == nil {
-			continue
+			return Series{}, fmt.Errorf("missing OHLC data")
 		}
 		var volume int64
 		if i < len(quote.Volume) && quote.Volume[i] != nil {
@@ -457,7 +473,14 @@ func (c *Client) fetchCandles(ctx context.Context, ticker string, timeframe Time
 			Volume: volume,
 		})
 	}
-	return candles, nil
+	return Series{Candles: candles, QuoteType: result.Meta.InstrumentType, Timezone: result.Meta.Timezone, SessionEnd: sessionEnd(result.Meta.Period.Regular.End)}, nil
+}
+
+func sessionEnd(ts int64) time.Time {
+	if ts <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(ts, 0)
 }
 
 func (c *Client) chartURL(ticker string, timeframe Timeframe) string {
@@ -468,6 +491,15 @@ func (c *Client) chartURL(ticker string, timeframe Timeframe) string {
 type yahooChartResponse struct {
 	Chart struct {
 		Result []struct {
+			Meta struct {
+				InstrumentType string `json:"instrumentType"`
+				Timezone       string `json:"exchangeTimezoneName"`
+				Period         struct {
+					Regular struct {
+						End int64 `json:"end"`
+					} `json:"regular"`
+				} `json:"currentTradingPeriod"`
+			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
 				Quote []struct {

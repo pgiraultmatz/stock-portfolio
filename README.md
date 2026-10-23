@@ -344,3 +344,84 @@ make run ADDR=:9000
 | `PUT` | `/api/categories` | Replace the full category list |
 | `GET` | `/api/search?q={query}` | Search tickers via Yahoo Finance |
 | `POST` | `/api/save` | Save the current state to the GitHub Gist |
+
+### Shared swing evaluations and Top 10
+
+The market digest defaults to `-market-digest-timeframe both` and
+`-market-digest-top 10`; explicit limits 3 and 5 remain supported. It scans all
+configured equities and ETFs, including watchlist entries, even without a new
+technical alert. Other instruments remain in the technical tables. The sell
+column labels watchlist candidates “À éviter”. Lists are never padded with HOLD.
+
+The daily report and market digest use the same versioned `swing-v1` evaluation.
+The portfolio displays that saved snapshot, its Toronto timestamp, components,
+reasons and warnings; live quote changes and personal conviction do not change it.
+Old unversioned badges display “À recalculer” until the next generation. Restart
+or redeploy the app to expose the new metrics fields and invalidate its old browser
+metrics cache. `signal` and `signal_note` remain available for existing consumers.
+
+The score is a prioritization heuristic for weeks to months, not a probability:
+weekly structure/momentum contributes −4…+4, daily −2…+2, and equity fundamentals
+−4…+4. ETF scores are `10 × (weekly + daily) / 6`, with no company valuation input.
+Weekly structure uses price/EMA20/EMA50 alignment and the four-bar EMA20 slope;
+daily uses price/EMA20 and its one-bar slope. RSI ≥55/≤45 determines momentum;
+daily also requires MACD above/below its signal. No oversold-only buy bonus remains.
+
+Equity valuation averages at least two available PEG, PSG and EV/GP contributions
+using the existing buckets. Quality averages net margin, revenue growth and free
+cash flow (+2 positive, −2 negative, 0 real zero); all three must be available.
+Analyst targets and net debt/operating cash flow are shown as context, outside the
+score. Missing data never count as zero. Daily histories older than 7 days, weekly
+older than 14 days, fundamentals older than 7 days, invalid OHLC data, or fewer than
+54 candles exclude a candidate with a visible coverage reason.
+
+Score thresholds are ≥7 STRONG BUY, ≥4 BUY, ≥1 ACCUMULATE, >−1 HOLD, >−3 LIGHT TRIM,
+>−5 TRIM, >−7 SELL, otherwise STRONG SELL. BUY additionally requires positive weekly
+and nonnegative daily; STRONG BUY requires positive daily and positive equity
+fundamentals. Otherwise positive badges are capped at ACCUMULATE or BUY.
+An equity with fundamentals ≥2, weekly >−3 and daily >−2 may receive ACCUMULATE
+with “Accumulation contre-tendance” even if its total is below 1.
+
+Current daily candles remain provisional until the exchange session ends; the
+current exchange-local ISO week is provisional until the next week begins.
+Unknown closing metadata is treated conservatively. Provisional inputs cap the
+extreme badges at BUY/SELL. Earnings within the next seven days add WAIT EARNINGS
+and cap STRONG BUY at BUY without removing the candidate. Past earnings do not
+trigger this warning. Ranking uses the final badge strength, then score, then ticker.
+
+The digest saves only evaluation fields in `stock-data.json`, preserving other
+stocks, financial data, unknown fields, the macro calendar and the financial refresh
+timestamp. Each evaluation carries its own timestamp. Use `-no-save-gist` for a
+local preview without updating stored evaluations or sending email, for example:
+
+```sh
+go run ./cmd/stock-checker -check-market-digest -no-save-gist -timeout 12m -market-digest-output /tmp/market-digest-preview.html
+```
+
+The digest also shows up to five **Retournements à surveiller** (three with
+`-market-digest-top=3`): eligible HOLD evaluations with weekly score below zero
+and daily score +2. They remain HOLD; this watch section does not upgrade the
+shared signal. Candidates are sorted by total score, then ticker, without
+repeating the buy/sell lists. Digest cards show compact price/change and
+weekly/daily summaries; imminent earnings appear beside the action in a
+highlighted `WAIT EARNINGS` badge. Full evaluation data remains stored for the
+portfolio details.
+
+**Opportunités en repli** is a separate screen for equities with valid, fresh
+histories and fundamentals. It requires a decline of at least 10% from the
+highest closing price in the last 20 daily candles, strictly positive operating
+margin, revenue growth and free cash flow, a nonnegative valuation component
+(using at least two of PEG/PSG/EV-to-gross-profit), and a negative daily or weekly
+technical score. These are screening thresholds, not calibrated return forecasts.
+The screen is not restricted to AI categories and does not guarantee any ticker
+will qualify. It never changes the swing score, badge, or top-buy/sell ordering.
+Up to 15 candidates, independently of the main buy/sell ranking limit, are ranked by drawdown,
+then valuation score, then ticker. A ticker may also appear in the main ranking with
+its unchanged signal; the additional card is labeled **Entrée anticipée · risque
+élevé**, with the drawdown and earnings warning. A negative net margin no longer
+excludes an otherwise qualifying company, but adds **Résultat net négatif — à
+examiner**. Missing or invalid operating margin never qualifies. This screen
+does not assume that every net loss is exceptional; the swing fundamental
+score still uses net margin. Missing
+pullback data in older snapshots is not inferred or treated as a qualifying dip;
+it is populated by the next report generation.

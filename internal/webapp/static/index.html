@@ -1359,8 +1359,8 @@ function renderCalendar() {
       }
       const hasTime = m.earningsDate.includes('T') && dt.getHours() + dt.getMinutes() > 0;
       const timeLabel = hasTime ? dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }) : '';
-      const sigCls = m.signalNote === 'WAIT EARNINGS' ? 'signal-light-trim' : (m.signalClass || '');
-      const sigTxt = m.signal ? `${m.signal}${m.signalNote ? ` (${esc(m.signalNote)})` : ''}` : '';
+      const sigCls = (m.signalNote || '').includes('WAIT EARNINGS') ? 'signal-light-trim' : (m.signalClass || '');
+      const sigTxt = m.signal ? `${esc(m.signal)}${m.signalNote ? ` (${esc(m.signalNote)})` : ''}` : '';
       html += `<div class="cal-row">
         <span class="cal-date ${m.earningsClass}">${esc(dateLabel)}${timeLabel ? ` <span style="font-size:10px;color:#8b949e">${timeLabel}</span>` : ''}</span>
         <span class="cal-type cal-type-earnings">Earnings</span>
@@ -2684,7 +2684,7 @@ async function load() {
 }
 
 // ---- metrics ----
-const METRICS_CACHE_KEY = 'metricsCache';
+const METRICS_CACHE_KEY = 'metricsCache-swing-v1';
 const MACRO_EVENTS_CACHE_KEY = 'macroHighlightsCache-v2';
 const METRICS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
@@ -2831,15 +2831,28 @@ Summary: [1–2 sentences]`;
   }).catch(() => {});
 }
 
+function evaluationDetailsHTML(e) {
+  if (!e) return '';
+  const stamp = new Date(e.evaluated_at).toLocaleString('fr-CA', {timeZone:'America/Toronto'});
+  const components = `Score ${e.score.toFixed(2)} · W ${e.weekly.toFixed(0)} · D ${e.daily.toFixed(0)}${e.fundamental != null ? ` · F ${e.fundamental.toFixed(2)}` : ''}`;
+  const context = [];
+  if (e.analyst_target != null) context.push(`Objectif analystes : ${e.analyst_target.toFixed(2)} (hors score)`);
+  if (e.net_debt_to_cashflow != null) context.push(`Dette nette / cash-flow opérationnel : ${e.net_debt_to_cashflow.toFixed(2)}x (hors score)`);
+  if (e.price_at) context.push(`Cours utilisé : ${e.price.toFixed(2)} · bougie au ${new Date(e.price_at).toLocaleString('fr-CA', {timeZone:'America/Toronto'})} Toronto`);
+  const reasons = [...(e.reasons || []), ...(e.warnings || []), ...context].map(x => `<div>${esc(x)}</div>`).join('');
+  return `<details class="sq-evaluation" style="display:inline-block;margin-left:8px;font-size:11px;color:#8b949e"><summary>${esc(e.basis)} · ${e.provisional ? 'Provisoire · ' : ''}${esc(stamp)} Toronto</summary><div style="padding:8px">${e.eligible ? esc(components) : 'Données insuffisantes'}${reasons}<div>Calcul daté ; indépendant du cours live et de la conviction personnelle.</div></div></details>`;
+}
+
 function stockPriorityHTML(ticker) {
   const m = metrics[ticker];
   if (!m || m.error) return '';
   const parts = [];
   if (m.earnings) parts.push(`<span class="sq-earnings ${m.earningsClass}">${esc(m.earnings)}</span>`);
   if (m.signal) {
-    const sigCls = m.signalNote === 'WAIT EARNINGS' ? 'signal-light-trim' : m.signalClass;
-    parts.push(`<span class="${sigCls} sq-signal">${m.signal}${m.signalNote ? ` <span class="sq-note">(${esc(m.signalNote)})</span>` : ''}</span>`);
+    const sigCls = (m.signalNote || '').includes('WAIT EARNINGS') ? 'signal-light-trim' : m.signalClass;
+    parts.push(`<span class="${sigCls} sq-signal">${esc(m.signal)}${m.signalNote ? ` <span class="sq-note">(${esc(m.signalNote)})</span>` : ''}</span>`);
   }
+  if (m.evaluation) parts.push(evaluationDetailsHTML(m.evaluation));
   return parts.join('');
 }
 

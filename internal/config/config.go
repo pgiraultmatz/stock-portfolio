@@ -306,6 +306,7 @@ func LoadPrompt() (string, error) {
 
 // StockFundamentals holds the pre-calculated data for a single stock.
 type StockFundamentals struct {
+	Evaluation       *models.Evaluation       `json:"evaluation,omitempty"`
 	FinancialQuality *models.FinancialQuality `json:"financial_quality,omitempty"`
 	RSI              float64                  `json:"rsi,omitempty"`
 	TargetPrice      float64                  `json:"target_price,omitempty"`
@@ -352,6 +353,7 @@ func SaveFundamentals(results []*models.StockResult, signals map[string][2]strin
 			continue
 		}
 		f := StockFundamentals{
+			Evaluation:       r.Evaluation,
 			FinancialQuality: r.FinancialQuality,
 			RSI:              r.RSI,
 			TargetPrice:      r.TargetPrice,
@@ -365,7 +367,9 @@ func SaveFundamentals(results []*models.StockResult, signals map[string][2]strin
 		if r.NextEarningsDate != nil {
 			f.NextEarnings = r.NextEarningsDate.UTC().Format(time.RFC3339)
 		}
-		if sig, ok := signals[r.Stock.Ticker]; ok {
+		if r.Evaluation != nil {
+			f.Signal, f.SignalNote = r.Evaluation.Badge()
+		} else if sig, ok := signals[r.Stock.Ticker]; ok {
 			f.Signal = sig[0]
 			f.SignalNote = sig[1]
 		}

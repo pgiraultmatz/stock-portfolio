@@ -70,7 +70,7 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "Timeout for the entire operation")
 	mock := flag.Bool("mock", false, "Use mock data instead of fetching from APIs (for testing report generation)")
 	noTwitter := flag.Bool("no-twitter", false, "Skip Twitter fetching")
-	noSaveGist := flag.Bool("no-save-gist", false, "Generate the full report without updating the Gist fundamentals cache")
+	noSaveGist := flag.Bool("no-save-gist", false, "Generate reports without updating the Gist cache or evaluations")
 	newsOnly := flag.Bool("news-only", false, "Generate a news-only HTML report without stock quotes, AI calls or Gist writes")
 	twitterOnly := flag.Bool("twitter-only", false, "Fetch tweets and output a standalone analysis prompt (no Yahoo Finance)")
 	checkAlerts := flag.Bool("check-alerts", false, "Check intraday price alerts and write report if any are triggered")
@@ -90,8 +90,8 @@ func main() {
 	financialDigestTop := flag.Int("financial-digest-top", 50, "Number of financial candidates: 3, 5, 10, 20, 30 or 50")
 	checkMarketDigest := flag.Bool("check-market-digest", false, "Check technical market signals and write a digest when signals are present")
 	marketDigestOutput := flag.String("market-digest-output", "market-signals.html", "Path to write the market signal digest HTML report")
-	marketDigestTop := flag.Int("market-digest-top", 3, "Number of top buy/reduce candidates: 3 or 5")
-	marketDigestTimeframe := flag.String("market-digest-timeframe", "daily", "Market signal digest timeframe: daily, weekly, or both")
+	marketDigestTop := flag.Int("market-digest-top", 10, "Number of top buy/reduce candidates: 3, 5 or 10")
+	marketDigestTimeframe := flag.String("market-digest-timeframe", "both", "Market signal digest timeframe: daily, weekly, or both")
 	marketDigestEMAThreshold := flag.Float64("market-digest-ema-threshold", 1.5, "Maximum close distance from EMA for the market digest, in percent")
 	marketDigestWeeklyEMAThreshold := flag.Float64("market-digest-weekly-ema-threshold", 3.0, "Maximum close distance from weekly EMA for the market digest, in percent")
 	flag.Parse()
@@ -172,7 +172,7 @@ func main() {
 	}
 
 	if *checkMarketDigest {
-		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestWeeklyEMAThreshold, *marketDigestTop, logger); err != nil {
+		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestWeeklyEMAThreshold, *marketDigestTop, logger, !*noSaveGist); err != nil {
 			logger.Error("market digest check failed", "error", err)
 			os.Exit(1)
 		}
@@ -476,6 +476,13 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 		return fmt.Errorf("no stocks were successfully analyzed")
 	}
 
+	// Collect decision histories while the independent news and market context run.
+	evaluationsDone := make(chan struct{})
+	go func() {
+		defer close(evaluationsDone)
+		collectDecisions(ctx, cfg, results, logger)
+	}()
+
 	// Fetch directional context independently of upcoming macro publications.
 	yahooClient := yahoo.NewClient(cfg.YahooAPI)
 	marketBarometer, vixData, marketQuotes := collectBarometer(ctx, yahooClient, logger)
@@ -602,6 +609,8 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 			Date: e.Date.Format("Mon 02 Jan, 15:04 MST"),
 		})
 	}
+	// Wait before any renderer reads the evaluation fields on results.
+	<-evaluationsDone
 	// Generate HTML report
 	generator, err := report.NewGenerator(cfg.GetCategoryEmoji(), cfg.GetCategoryOrder(), cfg.GetCategoryNarrative(), cfg.GetCategoryNarrativeScore())
 	if err != nil {
@@ -909,118 +918,59 @@ func collectEMAAlerts(ctx context.Context, cfg *config.Config, statePath string,
 	return triggered, nil
 }
 
-func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, weeklyEMAThreshold float64, topCount int, logger *slog.Logger) error {
-	if topCount != 3 && topCount != 5 {
-		return fmt.Errorf("market-digest-top must be 3 or 5")
+func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, weeklyEMAThreshold float64, topCount int, logger *slog.Logger, saveGist bool) error {
+	if topCount != 3 && topCount != 5 && topCount != 10 {
+		return fmt.Errorf("market-digest-top must be 3, 5 or 10")
 	}
+	if timeframeValue != "daily" && timeframeValue != "weekly" && timeframeValue != "both" {
+		return fmt.Errorf("unsupported market digest timeframe %q", timeframeValue)
+	}
+	if emaThreshold < 0 || weeklyEMAThreshold < 0 {
+		return fmt.Errorf("EMA thresholds must be positive")
+	}
+	snapshot := collectDecisions(ctx, cfg, nil, logger)
+	var dd, wd []divergencealerts.Alert
+	var dt, wt []technicalalerts.Alert
+	changes := map[string]marketdigest.ChangeSummary{}
+	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now(), Stocks: cfg.Stocks, Evaluations: map[string]models.Evaluation{}}
+	for _, r := range snapshot.Results {
+		ticker := r.Stock.Ticker
+		d, w := snapshot.Daily[ticker].Candles, snapshot.Weekly[ticker].Candles
+		dd = append(dd, divergencealerts.CheckCandles(r.Stock, d)...)
+		wd = append(wd, divergencealerts.CheckCandles(r.Stock, w)...)
+		dt = append(dt, technicalalerts.CheckCandles(r.Stock, technicalalerts.Daily, d, emaThreshold)...)
+		wt = append(wt, technicalalerts.CheckCandles(r.Stock, technicalalerts.Weekly, w, weeklyEMAThreshold)...)
+		e := r.Evaluation
+		options.Evaluations[ticker] = *e
+		c := marketdigest.ChangeSummary{}
+		if e.DailyChange != nil {
+			c.DailyChange = *e.DailyChange
+			c.HasDailyChange = true
+		}
+		if e.WeeklyChange != nil {
+			c.WeeklyChange = *e.WeeklyChange
+			c.HasWeeklyChange = true
+		}
+		changes[ticker] = c
+	}
+	var html string
 	if timeframeValue == "both" {
-		return runMultiTimeframeMarketDigest(ctx, cfg, outputPath, emaThreshold, weeklyEMAThreshold, topCount, logger)
+		html = marketdigest.GenerateMultiTimeframeReportWithChanges(dd, dt, wd, wt, emaThreshold, weeklyEMAThreshold, cfg.GetCategoryOrder(), changes, options)
+	} else if timeframeValue == "weekly" {
+		html = marketdigest.GenerateReportWithCategoryOrder(wd, wt, "weekly", weeklyEMAThreshold, cfg.GetCategoryOrder(), options)
+	} else {
+		html = marketdigest.GenerateReportWithCategoryOrder(dd, dt, "daily", emaThreshold, cfg.GetCategoryOrder(), options)
 	}
-	divergenceTimeframe, err := divergencealerts.ParseTimeframe(timeframeValue)
-	if err != nil {
-		return err
-	}
-	technicalTimeframe, err := technicalalerts.ParseTimeframe(timeframeValue)
-	if err != nil {
-		return err
-	}
-
-	divergences, err := collectAllDivergenceAlerts(ctx, cfg, divergenceTimeframe, logger)
-	if err != nil {
-		return err
-	}
-	technical, err := collectAllTechnicalAlerts(ctx, cfg, technicalTimeframe, emaThreshold, logger)
-	if err != nil {
-		return err
-	}
-
-	logger.Info("market signal digest triggered", "timeframe", timeframeValue, "divergences", len(divergences), "technical", len(technical), "ema_threshold", emaThreshold)
-	if len(divergences) == 0 && len(technical) == 0 {
-		return nil
-	}
-	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now()}
-	html := marketdigest.GenerateReportWithCategoryOrder(divergences, technical, timeframeValue, emaThreshold, cfg.GetCategoryOrder(), options)
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
 		return fmt.Errorf("writing market signal digest: %w", err)
 	}
-	logger.Info("market signal digest written", "path", outputPath)
-	return nil
-}
-
-func runMultiTimeframeMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, dailyEMAThreshold float64, weeklyEMAThreshold float64, topCount int, logger *slog.Logger) error {
-	dailyDivergences, err := collectAllDivergenceAlerts(ctx, cfg, divergencealerts.Daily, logger)
-	if err != nil {
-		return err
-	}
-	dailyTechnical, err := collectAllTechnicalAlerts(ctx, cfg, technicalalerts.Daily, dailyEMAThreshold, logger)
-	if err != nil {
-		return err
-	}
-	weeklyDivergences, err := collectAllDivergenceAlerts(ctx, cfg, divergencealerts.Weekly, logger)
-	if err != nil {
-		return err
-	}
-	weeklyTechnical, err := collectAllTechnicalAlerts(ctx, cfg, technicalalerts.Weekly, weeklyEMAThreshold, logger)
-	if err != nil {
-		return err
-	}
-
-	if len(dailyDivergences) == 0 && len(dailyTechnical) == 0 && len(weeklyDivergences) == 0 && len(weeklyTechnical) == 0 {
-		logger.Info("no technical market signals triggered")
-		return nil
-	}
-	changes := collectDigestChanges(ctx, cfg, dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, logger)
-
-	logger.Info(
-		"market signal digest triggered",
-		"timeframe", "both",
-		"daily_divergences", len(dailyDivergences),
-		"daily_technical", len(dailyTechnical),
-		"weekly_divergences", len(weeklyDivergences),
-		"weekly_technical", len(weeklyTechnical),
-		"daily_ema_threshold", dailyEMAThreshold,
-		"weekly_ema_threshold", weeklyEMAThreshold,
-	)
-	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now()}
-	html := marketdigest.GenerateMultiTimeframeReportWithChanges(dailyDivergences, dailyTechnical, weeklyDivergences, weeklyTechnical, dailyEMAThreshold, weeklyEMAThreshold, cfg.GetCategoryOrder(), changes, options)
-	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
-		return fmt.Errorf("writing market signal digest: %w", err)
+	if saveGist {
+		if err := config.SaveEvaluations(ctx, options.Evaluations); err != nil {
+			return fmt.Errorf("saving shared evaluations (report written): %w", err)
+		}
 	}
 	logger.Info("market signal digest written", "path", outputPath)
 	return nil
-}
-
-func collectDigestChanges(ctx context.Context, cfg *config.Config, dailyDivergences []divergencealerts.Alert, dailyTechnical []technicalalerts.Alert, weeklyDivergences []divergencealerts.Alert, weeklyTechnical []technicalalerts.Alert, logger *slog.Logger) map[string]marketdigest.ChangeSummary {
-	tickers := make(map[string]bool)
-	for _, alert := range dailyDivergences {
-		tickers[alert.Stock.Ticker] = true
-	}
-	for _, alert := range dailyTechnical {
-		tickers[alert.Stock.Ticker] = true
-	}
-	for _, alert := range weeklyDivergences {
-		tickers[alert.Stock.Ticker] = true
-	}
-	for _, alert := range weeklyTechnical {
-		tickers[alert.Stock.Ticker] = true
-	}
-
-	client := technicalalerts.NewClient(cfg.YahooAPI)
-	changes := make(map[string]marketdigest.ChangeSummary, len(tickers))
-	for ticker := range tickers {
-		change, err := client.DailyAndWeeklyChanges(ctx, ticker)
-		if err != nil {
-			logger.Warn("failed to fetch digest changes", "ticker", ticker, "error", err)
-			continue
-		}
-		changes[ticker] = marketdigest.ChangeSummary{
-			DailyChange:     change.DailyChange,
-			HasDailyChange:  change.HasDailyChange,
-			WeeklyChange:    change.WeeklyChange,
-			HasWeeklyChange: change.HasWeeklyChange,
-		}
-	}
-	return changes
 }
 
 func collectTechnicalAlerts(ctx context.Context, cfg *config.Config, statePath string, timeframe technicalalerts.Timeframe, emaThresholdPercent float64, logger *slog.Logger) ([]technicalalerts.Alert, error) {

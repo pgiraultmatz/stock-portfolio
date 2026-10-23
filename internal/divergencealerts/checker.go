@@ -92,8 +92,13 @@ func (c *Client) Check(ctx context.Context, stock models.Stock, timeframe Timefr
 	if err != nil {
 		return nil, err
 	}
+	return CheckCandles(stock, candles), nil
+}
+
+// CheckCandles reuses the shared history instead of fetching a second copy.
+func CheckCandles(stock models.Stock, candles []chartcalc.Candle) []Alert {
 	if len(candles) < 40 {
-		return nil, nil
+		return nil
 	}
 
 	rsi := chartcalc.CalcRSI14(candles)
@@ -127,7 +132,7 @@ func (c *Client) Check(ctx context.Context, stock models.Stock, timeframe Timefr
 			ChangePercent: changePercent,
 		})
 	}
-	return alerts, nil
+	return alerts
 }
 
 func Key(ticker string, timeframe Timeframe, div chartcalc.Divergence) string {

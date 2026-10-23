@@ -88,7 +88,7 @@ func TestGenerateReportIncludesTopBuyAndSellCandidates(t *testing.T) {
 		1.5,
 	)
 
-	for _, expected := range []string{"Top 3 achats / renforcements", "Top 3 allègements / ventes", "Renforcement à étudier", "Protection / sortie à étudier", "MSFT", "TSLA"} {
+	for _, expected := range []string{"Top 10 achats / renforcements", "Top 10 allègements / ventes", "Renforcement à étudier", "Protection / sortie à étudier", "MSFT", "TSLA"} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("expected report to contain %q", expected)
 		}

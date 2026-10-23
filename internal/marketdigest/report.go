@@ -130,6 +130,7 @@ func writeHeader(sb *strings.Builder) {
   .financial-table td { font-size: 12px; line-height: 1.6; }
   .top-picks th, .top-picks td { width: 50%; overflow-wrap: anywhere; }
   .pick-action { display: block; font-weight: bold; margin: 4px 0; }
+  .reversal-picks { background: white; padding: 12px 16px; border-left: 3px solid #d79a20; border-radius: 4px; font-size: 14px; }
   .pick-reasons { font-size: 12px; margin: 4px 0 10px; padding-left: 16px; }
   @media (max-width: 600px) { body { padding: 12px; } .top-picks th, .top-picks td { padding: 8px; } }
 </style>
