@@ -111,7 +111,7 @@ func rankPullbacks(options RankingOptions) []evaluationPick {
 }
 
 func writeEvaluationTopSection(sb *strings.Builder, options RankingOptions) {
-	buys, sells, excluded := rankEvaluations(options)
+	buys, sells, _ := rankEvaluations(options)
 	limit := rankingOptions([]RankingOptions{options}).Limit
 	sb.WriteString(`<h3>Priorités à examiner</h3><p class="muted">Horizon : semaines à mois · Conviction personnelle indépendante.</p>`)
 	fmt.Fprintf(sb, `<table class="top-picks"><tr><th>Top %d achats / renforcements</th><th>Top %d allègements / ventes</th></tr><tr><td>`, limit, limit)
@@ -126,13 +126,6 @@ func writeEvaluationTopSection(sb *strings.Builder, options RankingOptions) {
 		sb.WriteString(`<h3>Retournements à surveiller</h3><p class="muted">Daily positif, weekly encore défavorable · Rebond à confirmer.</p><div class="reversal-picks">`)
 		writeEvaluationList(sb, reversals, false)
 		sb.WriteString("</div>")
-	}
-	if len(excluded) > 0 {
-		fmt.Fprintf(sb, `<details><summary>Couverture : %d valeur(s) hors classement</summary><ul>`, len(excluded))
-		for _, p := range excluded {
-			fmt.Fprintf(sb, "<li>%s — %s</li>", html.EscapeString(p.stock.Ticker), html.EscapeString(strings.Join(p.evaluation.Warnings, " · ")))
-		}
-		sb.WriteString("</ul></details>")
 	}
 }
 

@@ -26,13 +26,16 @@ func TestSharedRankingsIncludeWatchlistAndLimitEligibleCandidates(t *testing.T) 
 	var sb strings.Builder
 	writeEvaluationTopSection(&sb, o)
 	content := sb.String()
-	for _, want := range []string{"Top 10 achats", "À éviter", "Achat à étudier", "MISSING", "&lt;script&gt;"} {
+	for _, want := range []string{"Top 10 achats", "À éviter", "Achat à étudier", "&lt;script&gt;"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("missing %s", want)
 		}
 	}
 	if strings.Contains(content, "<script>") || strings.Contains(content, "BUY10") {
 		t.Fatal("unsafe or over-limit output")
+	}
+	if strings.Contains(content, "Couverture :") || strings.Contains(content, "MISSING") {
+		t.Fatal("excluded-stock diagnostics should not be displayed")
 	}
 	for _, limit := range []int{3, 5, 10} {
 		o.Limit = limit
