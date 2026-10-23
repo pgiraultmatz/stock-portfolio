@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
@@ -93,7 +94,7 @@ func SaveEvaluations(ctx context.Context, evaluations map[string]models.Evaluati
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("reading evaluations: HTTP %d", resp.StatusCode)
+		return evaluationAPIError("reading evaluations", resp)
 	}
 	var gist struct {
 		Files map[string]struct {
@@ -122,16 +123,26 @@ func SaveEvaluations(ctx context.Context, evaluations map[string]models.Evaluati
 	}
 	patch.Header = req.Header.Clone()
 	patch.Header.Set("Content-Type", "application/json")
-	if etag := resp.Header.Get("ETag"); etag != "" {
-		patch.Header.Set("If-Match", etag)
-	}
+	// GitHub's Gist PATCH endpoint does not support conditional requests.
+	// Merge the freshly read document above, but do not send its GET ETag.
 	updated, err := http.DefaultClient.Do(patch)
 	if err != nil {
 		return err
 	}
 	defer updated.Body.Close()
 	if updated.StatusCode != http.StatusOK {
-		return fmt.Errorf("saving evaluations: HTTP %d", updated.StatusCode)
+		return evaluationAPIError("saving evaluations", updated)
 	}
 	return nil
+}
+
+func evaluationAPIError(operation string, response *http.Response) error {
+	var detail struct {
+		Message string `json:"message"`
+	}
+	// Include GitHub's explanation without dumping the response or request payload.
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&detail); err == nil && detail.Message != "" {
+		return fmt.Errorf("%s: HTTP %d: %s", operation, response.StatusCode, detail.Message)
+	}
+	return fmt.Errorf("%s: HTTP %d", operation, response.StatusCode)
 }

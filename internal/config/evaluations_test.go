@@ -13,12 +13,12 @@ import (
 	"stock-portfolio/internal/models"
 )
 
-func TestSaveEvaluationsPatchesOnlyStockDataAndHonorsConflicts(t *testing.T) {
+func TestSaveEvaluationsPatchesOnlyStockDataWithoutConditionalHeaders(t *testing.T) {
 	t.Setenv("GIST_ID", "test-gist")
 	t.Setenv("GH_TOKEN", "test-token")
 	old := http.DefaultClient
 	t.Cleanup(func() { http.DefaultClient = old })
-	for _, status := range []int{http.StatusOK, http.StatusPreconditionFailed} {
+	for _, status := range []int{http.StatusOK, http.StatusBadRequest, http.StatusForbidden, http.StatusPreconditionFailed} {
 		calls := 0
 		http.DefaultClient = &http.Client{Transport: financialTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
@@ -28,7 +28,7 @@ func TestSaveEvaluationsPatchesOnlyStockDataAndHonorsConflicts(t *testing.T) {
 			if r.Method == http.MethodGet {
 				return &http.Response{StatusCode: 200, Header: http.Header{"Etag": []string{`"v1"`}}, Body: io.NopCloser(strings.NewReader(`{"files":{"stock-data.json":{"content":"{\"stocks\":{\"A\":{\"peg_ratio\":1.2}},\"macro_events\":[{\"name\":\"CPI\"}]}"},"stock-config.json":{"content":"unchanged"}}}`))}, nil
 			}
-			if r.Method != http.MethodPatch || r.Header.Get("If-Match") != `"v1"` {
+			if r.Method != http.MethodPatch || r.Header.Get("If-Match") != "" || r.Header.Get("If-None-Match") != "" {
 				t.Errorf("unexpected request: %s %v", r.Method, r.Header)
 			}
 			var payload struct {
@@ -42,12 +42,22 @@ func TestSaveEvaluationsPatchesOnlyStockDataAndHonorsConflicts(t *testing.T) {
 			if len(payload.Files) != 1 || !strings.Contains(payload.Files["stock-data.json"].Content, "peg_ratio") || !strings.Contains(payload.Files["stock-data.json"].Content, "CPI") {
 				t.Fatal("patch lost data or touched other files")
 			}
-			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{"message":"GitHub error explanation"}`))}, nil
 		})}
 		err := SaveEvaluations(context.Background(), map[string]models.Evaluation{"A": {Version: models.EvaluationVersion, EvaluatedAt: time.Now(), Eligible: true, Signal: "BUY"}})
 		if (err != nil) != (status != 200) || calls != 2 {
 			t.Fatalf("status=%d calls=%d err=%v", status, calls, err)
 		}
+		if status != http.StatusOK && !strings.Contains(err.Error(), "GitHub error explanation") {
+			t.Fatalf("API error explanation missing: %v", err)
+		}
+	}
+}
+
+func TestEvaluationAPIErrorHandlesNonJSONResponse(t *testing.T) {
+	response := &http.Response{StatusCode: 502, Body: io.NopCloser(strings.NewReader("<html>Bad Gateway</html>"))}
+	if err := evaluationAPIError("saving evaluations", response); err.Error() != "saving evaluations: HTTP 502" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
