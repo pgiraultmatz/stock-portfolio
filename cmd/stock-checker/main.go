@@ -198,12 +198,6 @@ func main() {
 		return
 	}
 
-	// Fetch tweets if configured
-	var tweets tweetCollection
-	if !*noTwitter {
-		tweets = fetchAllXGroups(ctx, cfg, logger)
-	}
-
 	// Single stock check mode (triggered by -check or -ticker)
 	if *check || *ticker != "" {
 		if err := runSingleCheck(ctx, cfg, *ticker, logger); err != nil {
@@ -214,7 +208,7 @@ func main() {
 	}
 
 	// Full report mode
-	if err := runFullReport(ctx, cfg, *outputPath, *promptOutput, *promptHTMLOutput, tweets, logger, !*noSaveGist); err != nil {
+	if err := runFullReport(ctx, cfg, *outputPath, *promptOutput, *promptHTMLOutput, !*noTwitter, logger, !*noSaveGist); err != nil {
 		logger.Error("analysis failed", "error", err)
 		os.Exit(1)
 	}
@@ -437,7 +431,19 @@ func printStockResult(r *models.StockResult) {
 	fmt.Println()
 }
 
-func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOutput, promptHTMLOutput string, tweets tweetCollection, logger *slog.Logger, saveGist bool) error {
+func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOutput, promptHTMLOutput string, fetchTweets bool, logger *slog.Logger, saveGist bool) error {
+	// Resolve essential market data before tweets and portfolio requests consume
+	// the operation's deadline or Yahoo request capacity.
+	yahooClient := yahoo.NewClient(cfg.YahooAPI)
+	marketData, marketErr := collectRequiredMarketData(ctx, yahooClient, logger, defaultMarketRetryPolicy())
+	if marketErr != nil {
+		return marketErr
+	}
+	marketBarometer, vixData, marketContext := marketData.Barometer, marketData.VIX, marketData.Context
+	var tweets tweetCollection
+	if fetchTweets {
+		tweets = fetchAllXGroups(ctx, cfg, logger)
+	}
 	logger.Info("starting stock analysis",
 		"stocks", len(cfg.Stocks),
 		"concurrency", cfg.Concurrency,
@@ -483,11 +489,6 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 		defer close(evaluationsDone)
 		collectDecisions(ctx, cfg, results, logger)
 	}()
-
-	// Fetch directional context independently of upcoming macro publications.
-	yahooClient := yahoo.NewClient(cfg.YahooAPI)
-	marketBarometer, vixData, marketQuotes := collectBarometer(ctx, yahooClient, logger)
-	marketContext := collectMarketContext(ctx, yahooClient, marketBarometer, marketQuotes, time.Now(), logger)
 
 	var promptTemplate string
 	if cfg.AI.Enabled {
@@ -612,6 +613,9 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 	// Wait before any renderer reads the evaluation fields on results.
 	<-evaluationsDone
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("report generation deadline reached; report blocked: %w", err)
+	}
 	// Generate HTML report
 	generator, err := report.NewGenerator(cfg.GetCategoryEmoji(), cfg.GetCategoryOrder(), cfg.GetCategoryNarrative(), cfg.GetCategoryNarrativeScore())
 	if err != nil {

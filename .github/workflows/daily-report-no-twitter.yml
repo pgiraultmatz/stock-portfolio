@@ -9,7 +9,7 @@ env:
 jobs:
   stock-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -32,14 +32,24 @@ jobs:
           echo "TODAY_SAFE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: Run stock analysis
+        id: analysis
+        shell: bash
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          ./stock-checker -config config.json -output report.html -no-twitter -verbose
+          set -o pipefail
+          ./stock-checker -config config.json -output report.html -no-twitter -timeout 12m -verbose 2>&1 | tee stock-report.log
+
+      - name: Summarize generation failure
+        if: failure() && steps.analysis.outcome == 'failure'
+        run: |
+          echo '## Rapport non envoyé' >> "$GITHUB_STEP_SUMMARY"
+          echo 'La génération a échoué. Consultez Run stock analysis et stock-report.log dans les artifacts pour la cause et les tentatives de récupération.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Send email report
+        if: success() && steps.analysis.outcome == 'success'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -57,5 +67,7 @@ jobs:
         if: always()
         with:
           name: stock-report-${{ steps.date.outputs.TODAY_SAFE }}
-          path: report.html
+          path: |
+            report.html
+            stock-report.log
           retention-days: 30

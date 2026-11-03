@@ -451,3 +451,26 @@ branch, timeframe, thresholds, run ID and run attempt, with a restore prefix for
 the matching configuration. Runs on the same branch are serialized. Cache misses
 or eviction simply establish a new baseline; old emails cannot be compared until
 this feature has recorded its first successful run.
+
+### Required market summary and retry logs
+
+The full daily report collects its market summary before tweets and portfolio
+analysis. It requires all five usable barometer factors (ES, NQ, VIX, Brent and
+US 10-year yield), the AI/Semis context, the weekday backtest and the monthly
+seasonality. Missing, stale or insufficient data trigger up to four collection
+attempts, separated by 30 seconds, 1 minute and 2 minutes. Each Yahoo request
+remains bounded to eight seconds, and cancellation interrupts retry waits.
+
+If the summary is still incomplete, the command exits unsuccessfully before
+producing the report, so no daily email is sent. The final error identifies the
+missing components; preceding warnings include the instrument, API error,
+attempt number and next delay. A global deadline expiring later in the analysis
+also prevents report generation. The economic-calendar warning remains separate
+from these required market-summary checks.
+
+Both daily GitHub Actions workflows allow 12 minutes for the command and 20
+minutes for the job. Locally, use `-timeout 12m` to give the same allowance.
+Output is captured in `stock-report.log` without masking the command's exit
+status (`pipefail`). On failure, the Actions summary explains that the report
+was not sent. Logs are uploaded with the report artifact, even on failure, and
+retained for 30 days.

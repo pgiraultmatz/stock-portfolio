@@ -15,6 +15,10 @@ type marketQuoteSource interface {
 }
 
 func collectBarometer(ctx context.Context, source marketQuoteSource, logger *slog.Logger) (*barometer.Summary, *report.VIXData, map[string]yahoo.MarketQuote) {
+	return collectBarometerAt(ctx, source, logger, time.Now)
+}
+
+func collectBarometerAt(ctx context.Context, source marketQuoteSource, logger *slog.Logger, now func() time.Time) (*barometer.Summary, *report.VIXData, map[string]yahoo.MarketQuote) {
 	quotes := make(map[string]yahoo.MarketQuote)
 	logger.Info("fetching market barometer", "instruments", len(barometer.Instruments))
 	for _, instrument := range barometer.Instruments {
@@ -27,7 +31,7 @@ func collectBarometer(ctx context.Context, source marketQuoteSource, logger *slo
 		}
 		quotes[instrument.Ticker] = quote
 	}
-	summary := barometer.Evaluate(quotes, time.Now())
+	summary := barometer.Evaluate(quotes, now())
 	var vix *report.VIXData
 	if quote, ok := quotes["^VIX"]; ok {
 		vix = report.NewVIXData(quote.Price, quote.ChangePercent())
