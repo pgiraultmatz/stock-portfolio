@@ -939,7 +939,11 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 	scope := marketdigest.HistoryScope(timeframeValue, emaThreshold, weeklyEMAThreshold, topCount)
 	previous, err := marketdigest.LoadHistory(statePath, scope)
 	if err != nil {
-		logger.Warn("digest history unavailable; starting a new baseline", "error", err)
+		logger.Warn("digest history unavailable; starting a new baseline", "path", statePath, "error", err)
+	} else if previous == nil {
+		logger.Info("no compatible digest history; establishing baseline without highlights or rank arrows", "path", statePath, "scope", scope)
+	} else {
+		logger.Info("digest history loaded for section entries and rank comparison", "path", statePath, "scope", scope)
 	}
 	snapshot := collectDecisions(ctx, cfg, nil, logger)
 	var dd, wd []divergencealerts.Alert

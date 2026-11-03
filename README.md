@@ -426,7 +426,7 @@ score still uses net margin. Missing
 pullback data in older snapshots is not inferred or treated as a qualifying dip;
 it is populated by the next report generation.
 
-### New entries in the market digest
+### New entries and rank changes in the market digest
 
 Newly displayed tickers are highlighted independently in each of the four
 priority sections: pale green for buys, pale red for sells, and pale amber for
@@ -437,12 +437,20 @@ remains in the same section. Moving sections or returning after an absence does.
 The comparison uses the displayed lists, including their limits, rather than
 all eligible stocks. The technical category tables retain their existing display.
 
+Existing entries display a small triangle next to their signal, matching its color, when their
+rank changes in the same section: `▲ 3` means three places higher, `▼ 2` means
+two places lower. The tooltip shows the previous and current ranks. New entries,
+unchanged ranks and runs without a comparable baseline have no arrow. Movement
+describes ranking position, not price performance or a change in recommendation.
+The existing version 1 cache already stores rank order and remains compatible.
+
 The first run establishes a baseline without highlighting everything. Local
 generations save section membership beside the HTML as `<output>.state.json`;
 use `-market-digest-state <path>` to choose a different history file. Preview
 runs with `-no-save-gist` still update this local history. State is saved only
 after report generation and any enabled Gist save succeed. Missing, incompatible
-or corrupt history starts a new baseline; corrupt history is logged.
+or corrupt history starts a new baseline. Logs explicitly report whether a
+baseline was loaded or a new one is being established; corrupt history is a warning.
 
 GitHub Actions restores the preceding section history using
 [`actions/cache/restore`](https://github.com/actions/cache), then saves a new

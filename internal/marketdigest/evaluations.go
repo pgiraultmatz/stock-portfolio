@@ -11,10 +11,11 @@ import (
 )
 
 type evaluationPick struct {
-	stock      models.Stock
-	evaluation models.Evaluation
-	pullback   bool
-	isNew      bool
+	stock        models.Stock
+	evaluation   models.Evaluation
+	pullback     bool
+	isNew        bool
+	previousRank int
 }
 
 func rankEvaluations(options RankingOptions) (buys, sells, excluded []evaluationPick) {
@@ -136,7 +137,7 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 		return
 	}
 	sb.WriteString(`<ol class="signal-list">`)
-	for _, p := range picks {
+	for i, p := range picks {
 		e := p.evaluation
 		action := "À éviter"
 		class := "bearish"
@@ -167,7 +168,16 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 		} else {
 			sb.WriteString("<li>")
 		}
-		fmt.Fprintf(sb, `<strong class="%s">%s — %s</strong> <span class="muted">%s</span>`, class, html.EscapeString(p.stock.Ticker), html.EscapeString(e.Signal), html.EscapeString(p.stock.Name))
+		fmt.Fprintf(sb, `<strong class="%s">%s — %s`, class, html.EscapeString(p.stock.Ticker), html.EscapeString(e.Signal))
+		if rank := i + 1; p.previousRank > 0 && p.previousRank != rank {
+			arrow, places := "▲", p.previousRank-rank
+			if places < 0 {
+				arrow, places = "▼", -places
+			}
+			// Inherit the ticker/signal color in every section, including email clients.
+			fmt.Fprintf(sb, ` <span class="rank-change" title="Rang %d → %d" aria-label="Rang %d → %d" style="display:inline-block;white-space:nowrap;font-size:12px;color:inherit">%s %d</span>`, p.previousRank, rank, p.previousRank, rank, arrow, places)
+		}
+		fmt.Fprintf(sb, `</strong> <span class="muted">%s</span>`, html.EscapeString(p.stock.Name))
 		if category := strings.TrimSpace(p.stock.Category); category != "" {
 			fmt.Fprintf(sb, ` <span class="muted">· %s</span>`, html.EscapeString(category))
 		}
@@ -227,6 +237,7 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 func markNewPicks(picks []evaluationPick, previous *SectionHistory, section string) []evaluationPick {
 	for i := range picks {
 		picks[i].isNew = previous.isNew(section, picks[i].stock.Ticker)
+		picks[i].previousRank = previous.previousRank(section, picks[i].stock.Ticker)
 	}
 	return picks
 }

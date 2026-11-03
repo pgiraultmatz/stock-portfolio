@@ -60,6 +60,20 @@ func (h *SectionHistory) isNew(section, ticker string) bool {
 	return true
 }
 
+// previousRank uses the displayed order already stored in version 1 histories.
+// Zero means no comparable rank (including a new entry in this section).
+func (h *SectionHistory) previousRank(section, ticker string) int {
+	if h == nil || h.Version != historyVersion {
+		return 0
+	}
+	for i, existing := range h.Sections[section] {
+		if existing == ticker {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 func LoadHistory(path, scope string) (*SectionHistory, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
