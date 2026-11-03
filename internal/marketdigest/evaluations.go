@@ -14,6 +14,7 @@ type evaluationPick struct {
 	stock      models.Stock
 	evaluation models.Evaluation
 	pullback   bool
+	isNew      bool
 }
 
 func rankEvaluations(options RankingOptions) (buys, sells, excluded []evaluationPick) {
@@ -115,16 +116,16 @@ func writeEvaluationTopSection(sb *strings.Builder, options RankingOptions) {
 	limit := rankingOptions([]RankingOptions{options}).Limit
 	sb.WriteString(`<h3>Priorités à examiner</h3><p class="muted">Horizon : semaines à mois · Conviction personnelle indépendante.</p>`)
 	fmt.Fprintf(sb, `<table class="top-picks"><tr><th>Top %d achats / renforcements</th><th>Top %d allègements / ventes</th></tr><tr><td>`, limit, limit)
-	writeEvaluationList(sb, buys, true)
+	writeEvaluationList(sb, markNewPicks(buys, options.Previous, sectionBuys), true)
 	sb.WriteString("</td><td>")
-	writeEvaluationList(sb, sells, false)
+	writeEvaluationList(sb, markNewPicks(sells, options.Previous, sectionSells), false)
 	sb.WriteString("</td></tr></table>")
 	sb.WriteString(`<h3>Opportunités en repli</h3><p class="muted">Repli ≥ 10 % sur 20 séances · Marge opérationnelle, croissance et cash-flow libre positifs · Valorisation au moins neutre selon nos ratios. Classées par ampleur du repli ; signal swing inchangé.</p><div class="reversal-picks">`)
-	writeEvaluationList(sb, rankPullbacks(options), false)
+	writeEvaluationList(sb, markNewPicks(rankPullbacks(options), options.Previous, sectionPullbacks), false)
 	sb.WriteString("</div>")
 	if reversals := rankReversals(options); len(reversals) > 0 {
 		sb.WriteString(`<h3>Retournements à surveiller</h3><p class="muted">Daily positif, weekly encore défavorable · Rebond à confirmer.</p><div class="reversal-picks">`)
-		writeEvaluationList(sb, reversals, false)
+		writeEvaluationList(sb, markNewPicks(reversals, options.Previous, sectionReversals), false)
 		sb.WriteString("</div>")
 	}
 }
@@ -154,7 +155,19 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 		if p.pullback {
 			action, class = "Entrée anticipée · risque élevé", "watch"
 		}
-		fmt.Fprintf(sb, `<li><strong class="%s">%s — %s</strong> <span class="muted">%s</span>`, class, html.EscapeString(p.stock.Ticker), html.EscapeString(e.Signal), html.EscapeString(p.stock.Name))
+		if p.isNew {
+			background, border := "#fdf6e7", "#e8ce91"
+			if class == "bullish" {
+				background, border = "#edf7ef", "#b7d9bf"
+			} else if class == "bearish" {
+				background, border = "#fdf0ef", "#ebbfbb"
+			}
+			// Inline styles survive email clients which discard stylesheet classes.
+			fmt.Fprintf(sb, `<li style="margin:6px 0 10px"><div class="new-entry" style="display:inline-block;max-width:100%%;box-sizing:border-box;vertical-align:top;background-color:%s;border:1px solid %s;border-radius:6px;padding:8px 10px">`, background, border)
+		} else {
+			sb.WriteString("<li>")
+		}
+		fmt.Fprintf(sb, `<strong class="%s">%s — %s</strong> <span class="muted">%s</span>`, class, html.EscapeString(p.stock.Ticker), html.EscapeString(e.Signal), html.EscapeString(p.stock.Name))
 		if category := strings.TrimSpace(p.stock.Category); category != "" {
 			fmt.Fprintf(sb, ` <span class="muted">· %s</span>`, html.EscapeString(category))
 		}
@@ -203,9 +216,19 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 		if len(warnings) > 0 {
 			fmt.Fprintf(sb, `<div class="muted">%s</div>`, html.EscapeString(strings.Join(warnings, " · ")))
 		}
+		if p.isNew {
+			sb.WriteString("</div>")
+		}
 		sb.WriteString("</li>")
 	}
 	sb.WriteString("</ol>")
+}
+
+func markNewPicks(picks []evaluationPick, previous *SectionHistory, section string) []evaluationPick {
+	for i := range picks {
+		picks[i].isNew = previous.isNew(section, picks[i].stock.Ticker)
+	}
+	return picks
 }
 
 func evaluationOutlook(score float64) string {

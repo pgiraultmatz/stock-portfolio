@@ -425,3 +425,29 @@ does not assume that every net loss is exceptional; the swing fundamental
 score still uses net margin. Missing
 pullback data in older snapshots is not inferred or treated as a qualifying dip;
 it is populated by the next report generation.
+
+### New entries in the market digest
+
+Newly displayed tickers are highlighted independently in each of the four
+priority sections: pale green for buys, pale red for sells, and pale amber for
+pullbacks and reversals. Each highlight has a light border sized to its text,
+without an additional label or a full-width colored background.
+Price, score, badge and rank changes do not trigger a highlight while the ticker
+remains in the same section. Moving sections or returning after an absence does.
+The comparison uses the displayed lists, including their limits, rather than
+all eligible stocks. The technical category tables retain their existing display.
+
+The first run establishes a baseline without highlighting everything. Local
+generations save section membership beside the HTML as `<output>.state.json`;
+use `-market-digest-state <path>` to choose a different history file. Preview
+runs with `-no-save-gist` still update this local history. State is saved only
+after report generation and any enabled Gist save succeed. Missing, incompatible
+or corrupt history starts a new baseline; corrupt history is logged.
+
+GitHub Actions restores the preceding section history using
+[`actions/cache/restore`](https://github.com/actions/cache), then saves a new
+immutable cache entry only after a successful email send. Cache keys include
+branch, timeframe, thresholds, run ID and run attempt, with a restore prefix for
+the matching configuration. Runs on the same branch are serialized. Cache misses
+or eviction simply establish a new baseline; old emails cannot be compared until
+this feature has recorded its first successful run.

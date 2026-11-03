@@ -90,6 +90,7 @@ func main() {
 	financialDigestTop := flag.Int("financial-digest-top", 50, "Number of financial candidates: 3, 5, 10, 20, 30 or 50")
 	checkMarketDigest := flag.Bool("check-market-digest", false, "Check technical market signals and write a digest when signals are present")
 	marketDigestOutput := flag.String("market-digest-output", "market-signals.html", "Path to write the market signal digest HTML report")
+	marketDigestState := flag.String("market-digest-state", "", "Previous digest section membership (default: output path + .state.json)")
 	marketDigestTop := flag.Int("market-digest-top", 10, "Number of top buy/reduce candidates: 3, 5 or 10")
 	marketDigestTimeframe := flag.String("market-digest-timeframe", "both", "Market signal digest timeframe: daily, weekly, or both")
 	marketDigestEMAThreshold := flag.Float64("market-digest-ema-threshold", 1.5, "Maximum close distance from EMA for the market digest, in percent")
@@ -172,7 +173,7 @@ func main() {
 	}
 
 	if *checkMarketDigest {
-		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestWeeklyEMAThreshold, *marketDigestTop, logger, !*noSaveGist); err != nil {
+		if err := runMarketDigest(ctx, cfg, *marketDigestOutput, *marketDigestTimeframe, *marketDigestEMAThreshold, *marketDigestWeeklyEMAThreshold, *marketDigestTop, logger, !*noSaveGist, *marketDigestState); err != nil {
 			logger.Error("market digest check failed", "error", err)
 			os.Exit(1)
 		}
@@ -918,7 +919,7 @@ func collectEMAAlerts(ctx context.Context, cfg *config.Config, statePath string,
 	return triggered, nil
 }
 
-func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, weeklyEMAThreshold float64, topCount int, logger *slog.Logger, saveGist bool) error {
+func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string, timeframeValue string, emaThreshold float64, weeklyEMAThreshold float64, topCount int, logger *slog.Logger, saveGist bool, statePath string) error {
 	if topCount != 3 && topCount != 5 && topCount != 10 {
 		return fmt.Errorf("market-digest-top must be 3, 5 or 10")
 	}
@@ -928,11 +929,19 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 	if emaThreshold < 0 || weeklyEMAThreshold < 0 {
 		return fmt.Errorf("EMA thresholds must be positive")
 	}
+	if statePath == "" {
+		statePath = outputPath + ".state.json"
+	}
+	scope := marketdigest.HistoryScope(timeframeValue, emaThreshold, weeklyEMAThreshold, topCount)
+	previous, err := marketdigest.LoadHistory(statePath, scope)
+	if err != nil {
+		logger.Warn("digest history unavailable; starting a new baseline", "error", err)
+	}
 	snapshot := collectDecisions(ctx, cfg, nil, logger)
 	var dd, wd []divergencealerts.Alert
 	var dt, wt []technicalalerts.Alert
 	changes := map[string]marketdigest.ChangeSummary{}
-	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now(), Stocks: cfg.Stocks, Evaluations: map[string]models.Evaluation{}}
+	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now(), Stocks: cfg.Stocks, Evaluations: map[string]models.Evaluation{}, Previous: previous}
 	for _, r := range snapshot.Results {
 		ticker := r.Stock.Ticker
 		d, w := snapshot.Daily[ticker].Candles, snapshot.Weekly[ticker].Candles
@@ -968,6 +977,9 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 		if err := config.SaveEvaluations(ctx, options.Evaluations); err != nil {
 			return fmt.Errorf("saving shared evaluations (report written): %w", err)
 		}
+	}
+	if err := marketdigest.SnapshotSections(options, scope).Save(statePath); err != nil {
+		return fmt.Errorf("saving digest history (report written): %w", err)
 	}
 	logger.Info("market signal digest written", "path", outputPath)
 	return nil

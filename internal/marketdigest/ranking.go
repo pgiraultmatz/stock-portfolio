@@ -12,6 +12,7 @@ import (
 )
 
 type RankingOptions struct {
+	Previous     *SectionHistory
 	Evaluations  map[string]models.Evaluation
 	Stocks       []models.Stock
 	Limit        int

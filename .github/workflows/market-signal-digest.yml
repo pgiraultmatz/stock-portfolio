@@ -28,6 +28,9 @@ jobs:
   market-signal-digest:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: market-signal-digest-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout code
@@ -58,6 +61,15 @@ jobs:
             echo "OUTPUT_FILE=market-signals.html" >> $GITHUB_OUTPUT
           fi
 
+      - name: Restore previous digest sections
+        uses: actions/cache/restore@v5
+        continue-on-error: true
+        with:
+          path: .market-digest-state.json
+          key: market-digest-history-v1-${{ github.ref }}-${{ steps.meta.outputs.TIMEFRAME }}-${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }}-${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            market-digest-history-v1-${{ github.ref }}-${{ steps.meta.outputs.TIMEFRAME }}-${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }}-${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }}-
+
       - name: Build application
         run: go build -o stock-checker ./cmd/stock-checker
 
@@ -65,7 +77,7 @@ jobs:
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }} -market-digest-weekly-ema-threshold ${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -verbose
+        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }} -market-digest-weekly-ema-threshold ${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -market-digest-state .market-digest-state.json -verbose
 
       - name: Check report
         id: report
@@ -89,6 +101,15 @@ jobs:
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: Stock Analyzer <${{ secrets.EMAIL_USERNAME }}>
           secure: true
+
+      # Only advance the comparison baseline after generation and email succeed.
+      - name: Save delivered digest sections
+        if: steps.report.outputs.exists == 'true'
+        uses: actions/cache/save@v5
+        continue-on-error: true
+        with:
+          path: .market-digest-state.json
+          key: market-digest-history-v1-${{ github.ref }}-${{ steps.meta.outputs.TIMEFRAME }}-${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }}-${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload digest artifact
         if: steps.report.outputs.exists == 'true'

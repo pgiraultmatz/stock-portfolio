@@ -2,6 +2,8 @@ portfolio-editor
 stock-portfolio
 .env
 .env.prod
+.market-digest-state.json
+market-signals*.html.state.json
 files/
 stock-portfolio-linux
 .claude/
