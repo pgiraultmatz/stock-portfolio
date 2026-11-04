@@ -23,6 +23,7 @@ var templateFS embed.FS
 
 // Generator creates HTML reports from stock analysis results.
 type Generator struct {
+	ETFOverview             []ETFRowData
 	MarketContext           *barometer.MarketContext
 	Barometer               *barometer.Summary
 	MacroAlerts             []macro.CalendarAlert
@@ -48,6 +49,7 @@ type VIXData struct {
 
 // TemplateData contains the data passed to the HTML template.
 type TemplateData struct {
+	ETFOverview             []ETFRowData
 	MarketContext           *barometer.MarketContext
 	Barometer               *barometer.Summary
 	MacroAlerts             []macro.CalendarAlert
@@ -255,6 +257,7 @@ func (g *Generator) Generate(results []*models.StockResult) (string, error) {
 // GenerateWithAI creates an HTML report with optional AI analysis or manual prompt.
 func (g *Generator) GenerateWithAI(results []*models.StockResult, aiAnalysis *ai.Analysis, manualPrompt string, vix *VIXData, economicEvents []EconomicEventData, newsDigests ...*news.Digest) (string, error) {
 	data := g.prepareTemplateData(results)
+	data.ETFOverview = g.ETFOverview
 	if !g.ShowPositions {
 		data.CategoryGroups = nil
 		data.TotalStocks = 0

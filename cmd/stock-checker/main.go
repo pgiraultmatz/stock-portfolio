@@ -485,9 +485,10 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 
 	// Collect decision histories while the independent news and market context run.
 	evaluationsDone := make(chan struct{})
+	var decisionData decisionSnapshot
 	go func() {
 		defer close(evaluationsDone)
-		collectDecisions(ctx, cfg, results, logger)
+		decisionData = collectDecisions(ctx, cfg, results, logger)
 	}()
 
 	var promptTemplate string
@@ -623,6 +624,21 @@ func runFullReport(ctx context.Context, cfg *config.Config, outputPath, promptOu
 	}
 
 	generator.ShowPositions = cfg.Report.ShowPositions
+	etfSeries := make(map[string]report.ETFSeries, len(cfg.Stocks))
+	for _, stock := range cfg.Stocks {
+		etfSeries[stock.Ticker] = report.ETFSeries{
+			Daily:            decisionData.Daily[stock.Ticker].Candles,
+			Weekly:           decisionData.Weekly[stock.Ticker].Candles,
+			WeeklyTimezone:   decisionData.Weekly[stock.Ticker].Timezone,
+			WeeklySessionEnd: decisionData.Weekly[stock.Ticker].SessionEnd,
+		}
+	}
+	generator.ETFOverview = report.BuildETFOverview(cfg.Stocks, etfSeries, time.Now())
+	for _, row := range generator.ETFOverview {
+		if row.Daily.RSI == "Indisponible" || row.Weekly.RSI == "Indisponible" {
+			logger.Warn("ETF rotation data incomplete", "ticker", row.Ticker, "daily_rsi", row.Daily.RSI, "weekly_rsi", row.Weekly.RSI)
+		}
+	}
 	generator.TwitterAccounts = tweets.Accounts
 	generator.Barometer = marketBarometer
 	generator.MarketContext = marketContext

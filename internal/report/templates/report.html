@@ -100,6 +100,13 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
 .portfolio-news .news-priority{font-size:11px;font-weight:700;color:#116329}
 .portfolio-news .news-secondary{color:#57606a}
 .portfolio-news .news-warning{font-size:12px;color:#9a6700;margin:8px 0}
+.etf-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px;margin-top:10px}
+.etf-table th,.etf-table td{padding:8px 6px;border-bottom:1px solid #eaecef;text-align:right;vertical-align:top;overflow-wrap:anywhere}
+.etf-table th{background:#f6f8fa;font-weight:600}
+.etf-table th:first-child,.etf-table td:first-child{width:30%;text-align:left}
+.etf-table th:last-child,.etf-table td:last-child{width:18%;text-align:left}
+.etf-rsi-high{color:#9a4700;background:#fff1df;font-weight:700;border-radius:4px;padding:2px 4px}
+.etf-rsi-low{color:#0969da;background:#ddf4ff;font-weight:700;border-radius:4px;padding:2px 4px}
 .tweet{padding:10px 0;border-top:1px solid #eaecef}
 .tweet-text{white-space:pre-wrap;font-size:13px;margin-top:4px}
 @media(max-width:600px){.portfolio-news{padding:14px 16px}}
@@ -214,6 +221,29 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
         <section class="portfolio-news" aria-label="Actualités du portefeuille">
             <h2>Actualités à suivre</h2>
             {{template "news-items" .}}
+        </section>
+        {{end}}
+
+        {{if .ETFOverview}}
+        <section class="portfolio-news" aria-label="Vue sectorielle ETFs">
+            <h2>📊 ETFs — Rotation sectorielle <span class="news-meta">{{len .ETFOverview}} tickers</span></h2>
+            <p class="news-meta">Tri par RSI weekly décroissant · RSI 14 · Daily : dernière séance disponible, éventuellement en cours · Weekly : dernière semaine terminée, comparée à la précédente.</p>
+            <table class="etf-table">
+                <thead><tr><th>ETF / Secteur</th><th>Daily</th><th>RSI daily</th><th>Weekly</th><th>RSI weekly</th><th>État</th></tr></thead>
+                <tbody>
+                {{range .ETFOverview}}
+                <tr>
+                    <td><strong title="{{.Name}}">{{.Ticker}}</strong> · {{.Sector}}{{if .Examples}}<span class="barometer-detail"><a href="{{.ExamplesURL}}" style="color:inherit">{{.Examples}}</a></span>{{end}}</td>
+                    <td><strong class="{{.Daily.ChangeClass}}">{{.Daily.Change}}</strong>{{if .Daily.Date}}<span class="barometer-detail">{{.Daily.Date}}</span>{{end}}</td>
+                    <td><span class="{{.Daily.RSIClass}}">{{.Daily.RSI}}</span></td>
+                    <td><strong class="{{.Weekly.ChangeClass}}">{{.Weekly.Change}}</strong>{{if .Weekly.Date}}<span class="barometer-detail">{{.Weekly.Date}}</span>{{end}}</td>
+                    <td><span class="{{.Weekly.RSIClass}}">{{.Weekly.RSI}}</span></td>
+                    <td><span class="{{.StateClass}}">{{.State}}</span></td>
+                </tr>
+                {{end}}
+                </tbody>
+            </table>
+            <p class="news-meta"><span class="etf-rsi-high">RSI &gt; 70 : élevé</span> · <span class="etf-rsi-low">RSI &lt; 40 : faible</span> · Rebond potentiel : RSI daily en hausse après un passage sous 40 dans les 5 séances précédentes, avec une variation daily positive.</p>
         </section>
         {{end}}
 

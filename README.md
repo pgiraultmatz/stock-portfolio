@@ -145,6 +145,32 @@ remain unchanged; only the new financial workflow produces this report.
 
 ### Portfolio news in daily reports
 
+Daily reports display **ETFs — Rotation sectorielle** immediately after portfolio
+news. The table includes every instrument in the configured `ETFs` category,
+including watchlist entries, even when `report.show_positions` is false. It reuses
+the decision histories without additional Yahoo requests. No EMA alerts appear.
+The sector rows XLV, XLE, XLP, XLB, XLF, XLU, XLI and XLK include three representative
+company tickers beneath the sector label. Clicking the tickers opens the
+official State Street fund page. These static educational examples were verified
+on 2026-11-04; they are not a live ranking of holdings or additions to the watchlist.
+
+Columns show daily return and RSI(14), completed-week return and RSI(14), and a
+derived state. Rows sort by weekly RSI descending, with missing RSI last. Daily
+uses the latest available candle (possibly in progress). Weekly uses the last
+completed weekly candle against the preceding week's close, with its week date.
+The current week is excluded until Saturday in the exchange timezone, or Friday
+after the reported regular-session close when available. On a Friday holiday,
+it conservatively remains excluded until Saturday. Both weekly metrics use the
+same completed candle. Missing, stale or invalid series show `Indisponible`;
+RSI needs at least 15 closes, while a return can be shown with only two. Incomplete
+ETF coverage is logged without dropping the affected instrument from the table.
+
+States, in precedence order: **Surchauffe** (both RSI > 70), **Tendu** (daily > 70),
+**Rebond potentiel** (daily RSI rising, positive daily return, and an RSI < 40
+within the previous five daily candles), **Délaissé** (both RSI < 40), **Neutre**
+(both RSI in [40, 70]), otherwise **Mixte**. Missing either RSI gives
+**Indisponible**. These labels describe technical conditions rather than valuation.
+
 A separate **Veille cryptos** section is enabled by default via `crypto_news`.
 It uses Yahoo RSS for BTC-USD, ETH-USD and SOL-USD plus assets in categories
 starting with `Crypto` (case-insensitive). Configured holding flags are preserved;
