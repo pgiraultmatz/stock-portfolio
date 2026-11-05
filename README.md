@@ -393,6 +393,16 @@ Weekly structure uses price/EMA20/EMA50 alignment and the four-bar EMA20 slope;
 daily uses price/EMA20 and its one-bar slope. RSI ≥55/≤45 determines momentum;
 daily also requires MACD above/below its signal. No oversold-only buy bonus remains.
 
+Yahoo sometimes appends today's quote as an extra row in `1wk` responses.
+The shared decision-history client merges rows belonging to the same ISO week
+in the exchange timezone before computing weekly returns, RSI, EMA or signals.
+It preserves the week's opening timestamp/open, combines highs/lows/volume,
+and uses the latest close. This also handles ISO year boundaries and Monday
+holidays without merging the next calendar week. Invalid OHLC or unordered
+timestamps remain errors. In digest cards, D means the latest session and W
+the current (or last available) week versus the preceding week's close. The
+daily report's ETF rotation table intentionally uses the last completed week.
+
 Equity valuation averages at least two available PEG, PSG and EV/GP contributions
 using the existing buckets. Quality averages net margin, revenue growth and free
 cash flow (+2 positive, −2 negative, 0 real zero); all three must be available.
@@ -429,8 +439,8 @@ The digest also shows up to five **Retournements à surveiller** (three with
 and daily score +2. They remain HOLD; this watch section does not upgrade the
 shared signal. Candidates are sorted by total score, then ticker, without
 repeating the buy/sell lists. Digest cards show compact price/change and
-weekly/daily summaries; imminent earnings appear beside the action in a
-highlighted `WAIT EARNINGS` badge. Full evaluation data remains stored for the
+weekly/daily summaries without repeated action labels. Imminent earnings retain
+a highlighted `WAIT EARNINGS` badge with the date. Full evaluation data remains stored for the
 portfolio details.
 
 **Opportunités en repli** is a separate screen for equities with valid, fresh

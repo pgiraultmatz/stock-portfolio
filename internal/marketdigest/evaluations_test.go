@@ -26,7 +26,7 @@ func TestSharedRankingsIncludeWatchlistAndLimitEligibleCandidates(t *testing.T) 
 	var sb strings.Builder
 	writeEvaluationTopSection(&sb, o)
 	content := sb.String()
-	for _, want := range []string{"Top 10 achats", "À éviter", "Achat à étudier", "&lt;script&gt;"} {
+	for _, want := range []string{"Top 10 achats", "SELL — SELL", "BUY00 — BUY", "&lt;script&gt;"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("missing %s", want)
 		}
@@ -93,7 +93,7 @@ func TestReversalsKeepHoldSignalAndRequireStrongDailyRecovery(t *testing.T) {
 		t.Fatalf("unexpected reversal picks: %+v", picks)
 	}
 	content := GenerateMultiTimeframeReportWithChanges(nil, nil, nil, nil, 1.5, 3, nil, nil, o)
-	if !strings.Contains(content, "Retournements à surveiller") || strings.Count(content, "NEE — HOLD") != 1 || !strings.Contains(content, "Rebond à confirmer") {
+	if !strings.Contains(content, "Retournements à surveiller") || strings.Count(content, "NEE — HOLD") != 1 || strings.Contains(content, "Rebond à confirmer") {
 		t.Fatal("missing or duplicated rebound candidate")
 	}
 	for i := 0; i < 7; i++ {
@@ -110,7 +110,7 @@ func TestReversalsKeepHoldSignalAndRequireStrongDailyRecovery(t *testing.T) {
 	}
 }
 
-func TestCompactCardsHighlightEarningsBesideAction(t *testing.T) {
+func TestCompactCardsKeepEarningsWithoutRepeatedAction(t *testing.T) {
 	target, debt := 630.0, 2.45
 	e := models.Evaluation{Version: models.EvaluationVersion, Eligible: true, Signal: "BUY", Score: 5, Weekly: 1, Daily: 2, Price: 552.35, EvaluatedAt: rankingNow, EarningsAt: &rankingNow, AnalystTarget: &target, NetDebtToCashflow: &debt, Reasons: []string{"Verbose structure and momentum details"}, Warnings: []string{"Provisoire", "WAIT EARNINGS", "<unsafe>"}}
 	watch := false
@@ -118,10 +118,10 @@ func TestCompactCardsHighlightEarningsBesideAction(t *testing.T) {
 	writeEvaluationList(&sb, []evaluationPick{{stock: models.Stock{Ticker: "TEST", InPortfolio: &watch}, evaluation: e}}, true)
 	content := sb.String()
 	action := strings.Split(strings.Split(content, `<div class="pick-action">`)[1], "</div>")[0]
-	if !strings.Contains(action, "Achat à étudier") || !strings.Contains(action, `class="earnings-warning"`) || !strings.Contains(action, "WAIT EARNINGS") || !strings.Contains(action, rankingNow.Format("02/01")) {
-		t.Fatalf("earnings not beside action: %s", action)
+	if strings.Contains(action, "Achat à étudier") || !strings.Contains(action, `class="earnings-warning"`) || !strings.Contains(action, "WAIT EARNINGS") || !strings.Contains(action, rankingNow.Format("02/01")) {
+		t.Fatalf("earnings badge missing or repeated action present: %s", action)
 	}
-	for _, removed := range []string{"Calculé le", "Objectif analystes", "Dette nette", "Verbose structure", "<unsafe>"} {
+	for _, removed := range []string{"Achat à étudier", "Renforcement à étudier", "Allègement / vente à étudier", "À éviter", "Calculé le", "Objectif analystes", "Dette nette", "Verbose structure", "<unsafe>"} {
 		if strings.Contains(content, removed) {
 			t.Errorf("unexpected content: %s", removed)
 		}
@@ -173,7 +173,7 @@ func TestPullbackRankingIsIndependentAndDoesNotFillWithInvalidCandidates(t *test
 		t.Fatal("largest qualifying drawdown must take priority")
 	}
 	content := GenerateMultiTimeframeReportWithChanges(nil, nil, nil, nil, 1.5, 3, nil, nil, o)
-	if !strings.Contains(content, "Opportunités en repli") || !strings.Contains(content, "Entrée anticipée · risque élevé") || !strings.Contains(content, "Repli −20.0%") || !strings.Contains(content, "DIP11 — LIGHT TRIM") || !strings.Contains(content, "Résultat net négatif — à examiner") {
+	if !strings.Contains(content, "Opportunités en repli") || strings.Contains(content, "Entrée anticipée · risque élevé") || !strings.Contains(content, "Repli −20.0%") || !strings.Contains(content, "DIP11 — LIGHT TRIM") || !strings.Contains(content, "Résultat net négatif — à examiner") {
 		t.Fatal("missing pullback context or changed signal")
 	}
 }

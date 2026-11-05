@@ -226,7 +226,7 @@ func writeTopList(sb *strings.Builder, picks []topPick, className string) {
 	}
 	sb.WriteString(`<ol class="signal-list">`)
 	for _, pick := range picks {
-		fmt.Fprintf(sb, `<li><span class="%s">%s</span> <span class="muted">%s</span><span class="pick-action">%s</span><ul class="pick-reasons">`, className, html.EscapeString(pick.ticker), html.EscapeString(pick.name), html.EscapeString(pick.action))
+		fmt.Fprintf(sb, `<li><span class="%s">%s</span> <span class="muted">%s</span><ul class="pick-reasons">`, className, html.EscapeString(pick.ticker), html.EscapeString(pick.name))
 		for _, reason := range pick.signals {
 			fmt.Fprintf(sb, "<li>%s</li>", html.EscapeString(reason))
 		}

@@ -473,6 +473,12 @@ func (c *Client) FetchSeries(ctx context.Context, ticker string, timeframe Timef
 			Volume: volume,
 		})
 	}
+	if timeframe == Weekly {
+		candles, err = mergeWeeklyQuoteRows(candles, result.Meta.Timezone)
+		if err != nil {
+			return Series{}, fmt.Errorf("normalizing Yahoo weekly candles: %w", err)
+		}
+	}
 	return Series{Candles: candles, QuoteType: result.Meta.InstrumentType, Timezone: result.Meta.Timezone, SessionEnd: sessionEnd(result.Meta.Period.Regular.End)}, nil
 }
 

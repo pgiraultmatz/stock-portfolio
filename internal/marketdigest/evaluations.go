@@ -115,7 +115,7 @@ func rankPullbacks(options RankingOptions) []evaluationPick {
 func writeEvaluationTopSection(sb *strings.Builder, options RankingOptions) {
 	buys, sells, _ := rankEvaluations(options)
 	limit := rankingOptions([]RankingOptions{options}).Limit
-	sb.WriteString(`<h3>Priorités à examiner</h3><p class="muted">Horizon : semaines à mois · Conviction personnelle indépendante.</p>`)
+	sb.WriteString(`<h3>Priorités à examiner</h3><p class="muted">Horizon : semaines à mois · Conviction personnelle indépendante.<br>Variations : D dernière séance · W semaine en cours ou dernière disponible.</p>`)
 	fmt.Fprintf(sb, `<table class="top-picks"><tr><th>Top %d achats / renforcements</th><th>Top %d allègements / ventes</th></tr><tr><td>`, limit, limit)
 	writeEvaluationList(sb, markNewPicks(buys, options.Previous, sectionBuys), true)
 	sb.WriteString("</td><td>")
@@ -125,7 +125,7 @@ func writeEvaluationTopSection(sb *strings.Builder, options RankingOptions) {
 	writeEvaluationList(sb, markNewPicks(rankPullbacks(options), options.Previous, sectionPullbacks), false)
 	sb.WriteString("</div>")
 	if reversals := rankReversals(options); len(reversals) > 0 {
-		sb.WriteString(`<h3>Retournements à surveiller</h3><p class="muted">Daily positif, weekly encore défavorable · Rebond à confirmer.</p><div class="reversal-picks">`)
+		sb.WriteString(`<h3>Retournements à surveiller</h3><p class="muted">Daily positif, weekly encore défavorable.</p><div class="reversal-picks">`)
 		writeEvaluationList(sb, markNewPicks(reversals, options.Previous, sectionReversals), false)
 		sb.WriteString("</div>")
 	}
@@ -139,22 +139,12 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 	sb.WriteString(`<ol class="signal-list">`)
 	for i, p := range picks {
 		e := p.evaluation
-		action := "À éviter"
 		class := "bearish"
 		if buy {
 			class = "bullish"
-			action = "Achat à étudier"
-			if p.stock.IsInPortfolio() {
-				action = "Renforcement à étudier"
-			}
-		} else if p.stock.IsInPortfolio() {
-			action = "Allègement / vente à étudier"
 		}
-		if e.Signal == "HOLD" {
-			action, class = "Rebond à confirmer", "watch"
-		}
-		if p.pullback {
-			action, class = "Entrée anticipée · risque élevé", "watch"
+		if e.Signal == "HOLD" || p.pullback {
+			class = "watch"
 		}
 		if p.isNew {
 			background, border := "#fdf6e7", "#e8ce91"
@@ -184,27 +174,22 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 		if e.QuoteType == "ETF" {
 			sb.WriteString(` <span class="muted">ETF</span>`)
 		}
-		fmt.Fprintf(sb, `<div class="pick-action">%s`, action)
 		for _, warning := range e.Warnings {
 			if warning == "WAIT EARNINGS" {
-				sb.WriteString(` <span class="earnings-warning" style="display:inline-block;background:#fff0bd;color:#783c00;border:1px solid #d79a20;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:bold">WAIT EARNINGS`)
+				sb.WriteString(`<div class="pick-action"><span class="earnings-warning" style="display:inline-block;background:#fff0bd;color:#783c00;border:1px solid #d79a20;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:bold">WAIT EARNINGS`)
 				if e.EarningsAt != nil {
 					fmt.Fprintf(sb, ` · %s`, e.EarningsAt.UTC().Format("02/01"))
 				}
-				sb.WriteString("</span>")
+				sb.WriteString("</span></div>")
 				break
 			}
 		}
-		sb.WriteString("</div>")
 		fmt.Fprintf(sb, `<div>%.2f`, e.Price)
 		if e.DailyChange != nil {
 			fmt.Fprintf(sb, ` · D %+.2f%%`, *e.DailyChange)
 		}
 		if e.WeeklyChange != nil {
 			fmt.Fprintf(sb, ` · W %+.2f%%`, *e.WeeklyChange)
-		}
-		if !e.PriceAt.IsZero() {
-			fmt.Fprintf(sb, ` <span class="muted">(%s)</span>`, e.PriceAt.UTC().Format("02/01"))
 		}
 		fmt.Fprintf(sb, `</div><div class="muted">Weekly %s · Daily %s · Score %+.1f</div>`, evaluationOutlook(e.Weekly), evaluationOutlook(e.Daily), e.Score)
 		if p.pullback && e.Pullback != nil {
