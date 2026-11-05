@@ -156,8 +156,9 @@ func TestETFOverviewSelectionOrderingAndTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	start, end := strings.Index(content, `<section class="portfolio-news" aria-label="Vue sectorielle ETFs">`), strings.Index(content, `<section class="portfolio-news" aria-label="Veille cryptos">`)
-	if start < strings.Index(content, "<h2>Actualités à suivre</h2>") || end <= start {
-		t.Fatal("ETF section must follow portfolio news and precede crypto news")
+	newsStart := strings.Index(content, "<h2>Actualités à suivre</h2>")
+	if start < 0 || newsStart <= start || end <= newsStart {
+		t.Fatal("ETF section must precede portfolio news and crypto news")
 	}
 	for _, text := range []string{"Rotation sectorielle", "RSI daily", "RSI weekly", "État", "Sem. du 26/10", "Low &lt;ETF&gt;", "Indisponible"} {
 		if !strings.Contains(content[start:end], text) {

@@ -411,10 +411,11 @@ func calcMACD(candles []chartcalc.Candle) []macdPoint {
 
 // Series contains source metadata used to identify unfinished trading periods.
 type Series struct {
-	Candles    []chartcalc.Candle
-	QuoteType  string
-	Timezone   string
-	SessionEnd time.Time
+	DailyCloseFromQuote bool
+	Candles             []chartcalc.Candle
+	QuoteType           string
+	Timezone            string
+	SessionEnd          time.Time
 }
 
 func (c *Client) fetchCandles(ctx context.Context, ticker string, timeframe Timeframe) ([]chartcalc.Candle, error) {
@@ -455,10 +456,17 @@ func (c *Client) FetchSeries(ctx context.Context, ticker string, timeframe Timef
 	if n != len(result.Timestamp) {
 		return Series{}, fmt.Errorf("misaligned OHLC data")
 	}
+	recovered := false
+	if timeframe == Daily && n > 0 && quote.Close[n-1] == nil {
+		if candle, ok := recoverDailyClose(result.Timestamp[n-1], quote.Open[n-1], quote.High[n-1], quote.Low[n-1], result.Meta, time.Now()); ok {
+			quote.Close[n-1], quote.High[n-1], quote.Low[n-1] = &candle.Close, &candle.High, &candle.Low
+			recovered = true
+		}
+	}
 	candles := make([]chartcalc.Candle, 0, n)
 	for i := 0; i < n; i++ {
 		if quote.Open[i] == nil || quote.High[i] == nil || quote.Low[i] == nil || quote.Close[i] == nil {
-			return Series{}, fmt.Errorf("missing OHLC data")
+			return Series{}, fmt.Errorf("missing OHLC data at %s", time.Unix(result.Timestamp[i], 0).UTC().Format(time.RFC3339))
 		}
 		var volume int64
 		if i < len(quote.Volume) && quote.Volume[i] != nil {
@@ -479,7 +487,7 @@ func (c *Client) FetchSeries(ctx context.Context, ticker string, timeframe Timef
 			return Series{}, fmt.Errorf("normalizing Yahoo weekly candles: %w", err)
 		}
 	}
-	return Series{Candles: candles, QuoteType: result.Meta.InstrumentType, Timezone: result.Meta.Timezone, SessionEnd: sessionEnd(result.Meta.Period.Regular.End)}, nil
+	return Series{Candles: candles, QuoteType: result.Meta.InstrumentType, Timezone: result.Meta.Timezone, SessionEnd: sessionEnd(result.Meta.Period.Regular.End), DailyCloseFromQuote: recovered}, nil
 }
 
 func sessionEnd(ts int64) time.Time {
@@ -494,19 +502,23 @@ func (c *Client) chartURL(ticker string, timeframe Timeframe) string {
 	return fmt.Sprintf("%s/%s?range=%s&interval=%s", c.baseURL, url.PathEscape(ticker), url.QueryEscape(r), url.QueryEscape(interval))
 }
 
+type yahooSeriesMeta struct {
+	InstrumentType     string  `json:"instrumentType"`
+	Timezone           string  `json:"exchangeTimezoneName"`
+	RegularMarketPrice float64 `json:"regularMarketPrice"`
+	RegularMarketTime  int64   `json:"regularMarketTime"`
+	Period             struct {
+		Regular struct {
+			End int64 `json:"end"`
+		} `json:"regular"`
+	} `json:"currentTradingPeriod"`
+}
+
 type yahooChartResponse struct {
 	Chart struct {
 		Result []struct {
-			Meta struct {
-				InstrumentType string `json:"instrumentType"`
-				Timezone       string `json:"exchangeTimezoneName"`
-				Period         struct {
-					Regular struct {
-						End int64 `json:"end"`
-					} `json:"regular"`
-				} `json:"currentTradingPeriod"`
-			} `json:"meta"`
-			Timestamp  []int64 `json:"timestamp"`
+			Meta       yahooSeriesMeta `json:"meta"`
+			Timestamp  []int64         `json:"timestamp"`
 			Indicators struct {
 				Quote []struct {
 					Open   []*float64 `json:"open"`

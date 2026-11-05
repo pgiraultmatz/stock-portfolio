@@ -77,7 +77,19 @@ jobs:
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }} -market-digest-weekly-ema-threshold ${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -market-digest-state .market-digest-state.json -verbose
+        shell: bash
+        run: |
+          set -o pipefail
+          ./stock-checker -config config.json -check-market-digest -market-digest-timeframe ${{ steps.meta.outputs.TIMEFRAME }} -market-digest-ema-threshold ${{ steps.meta.outputs.DAILY_EMA_THRESHOLD }} -market-digest-weekly-ema-threshold ${{ steps.meta.outputs.WEEKLY_EMA_THRESHOLD }} -market-digest-output ${{ steps.meta.outputs.OUTPUT_FILE }} -market-digest-state .market-digest-state.json -verbose 2>&1 | tee market-digest.log
+
+      - name: Upload digest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-digest-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: market-digest.log
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Check report
         id: report

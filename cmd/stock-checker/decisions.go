@@ -119,9 +119,14 @@ func collectDecisionData(ctx context.Context, cfg *config.Config, seeds []*model
 	}
 	wg.Wait()
 	now := time.Now()
+	recovered := 0
 	for _, r := range out.Results {
 		r.Evaluation = decisions.Evaluate(inputs[r.Stock.Ticker], now)
+		if out.Daily[r.Stock.Ticker].DailyCloseFromQuote {
+			recovered++
+			logger.Debug("daily close recovered from same-session Yahoo regular quote", "ticker", r.Stock.Ticker)
+		}
 	}
-	logger.Info("shared evaluations ready", "stocks", len(out.Results), "version", models.EvaluationVersion)
+	logger.Info("shared evaluations ready", "stocks", len(out.Results), "daily_closes_recovered", recovered, "version", models.EvaluationVersion)
 	return out
 }

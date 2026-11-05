@@ -961,7 +961,12 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 	} else {
 		logger.Info("digest history loaded for section entries and rank comparison", "path", statePath, "scope", scope)
 	}
-	snapshot := collectDecisions(ctx, cfg, nil, logger)
+	snapshot, err := collectDigestWithRetry(ctx, func(ctx context.Context) decisionSnapshot {
+		return collectDecisions(ctx, cfg, nil, logger)
+	}, logger, digestRetryPolicy{Delays: []time.Duration{30 * time.Second, time.Minute}, Wait: waitForMarketRetry})
+	if err != nil {
+		return err
+	}
 	var dd, wd []divergencealerts.Alert
 	var dt, wt []technicalalerts.Alert
 	changes := map[string]marketdigest.ChangeSummary{}

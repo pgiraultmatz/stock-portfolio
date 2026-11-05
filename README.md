@@ -145,7 +145,7 @@ remain unchanged; only the new financial workflow produces this report.
 
 ### Portfolio news in daily reports
 
-Daily reports display **ETFs — Rotation sectorielle** immediately after portfolio
+Daily reports display **ETFs — Rotation sectorielle** immediately before portfolio
 news. The table includes every instrument in the configured `ETFs` category,
 including watchlist entries, even when `report.show_positions` is false. It reuses
 the decision histories without additional Yahoo requests. No EMA alerts appear.

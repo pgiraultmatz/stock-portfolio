@@ -217,13 +217,6 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
         </section>
         {{end}}
 
-        {{with .News}}
-        <section class="portfolio-news" aria-label="Actualités du portefeuille">
-            <h2>Actualités à suivre</h2>
-            {{template "news-items" .}}
-        </section>
-        {{end}}
-
         {{if .ETFOverview}}
         <section class="portfolio-news" aria-label="Vue sectorielle ETFs">
             <h2>📊 ETFs — Rotation sectorielle <span class="news-meta">{{len .ETFOverview}} tickers</span></h2>
@@ -244,6 +237,13 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
                 </tbody>
             </table>
             <p class="news-meta"><span class="etf-rsi-high">RSI &gt; 70 : élevé</span> · <span class="etf-rsi-low">RSI &lt; 40 : faible</span> · Rebond potentiel : RSI daily en hausse après un passage sous 40 dans les 5 séances précédentes, avec une variation daily positive.</p>
+        </section>
+        {{end}}
+
+        {{with .News}}
+        <section class="portfolio-news" aria-label="Actualités du portefeuille">
+            <h2>Actualités à suivre</h2>
+            {{template "news-items" .}}
         </section>
         {{end}}
 
