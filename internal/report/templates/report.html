@@ -103,8 +103,9 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
 .etf-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px;margin-top:10px}
 .etf-table th,.etf-table td{padding:8px 6px;border-bottom:1px solid #eaecef;text-align:right;vertical-align:top;overflow-wrap:anywhere}
 .etf-table th{background:#f6f8fa;font-weight:600}
-.etf-table th:first-child,.etf-table td:first-child{width:30%;text-align:left}
-.etf-table th:last-child,.etf-table td:last-child{width:18%;text-align:left}
+.etf-table th:first-child,.etf-table td:first-child{width:22%;text-align:left}
+.etf-table th:nth-child(2),.etf-table td:nth-child(2){width:24%;text-align:left}
+.etf-table th:last-child,.etf-table td:last-child{width:14%;text-align:left}
 .etf-rsi-high{color:#9a4700;background:#fff1df;font-weight:700;border-radius:4px;padding:2px 4px}
 .etf-rsi-low{color:#0969da;background:#ddf4ff;font-weight:700;border-radius:4px;padding:2px 4px}
 .tweet{padding:10px 0;border-top:1px solid #eaecef}
@@ -220,13 +221,14 @@ td{padding:8px 14px;vertical-align:middle;border-bottom:1px solid #eaecef}
         {{if .ETFOverview}}
         <section class="portfolio-news" aria-label="Vue sectorielle ETFs">
             <h2>📊 ETFs — Rotation sectorielle <span class="news-meta">{{len .ETFOverview}} tickers</span></h2>
-            <p class="news-meta">Tri par RSI weekly décroissant · RSI 14 · Daily : dernière séance disponible, éventuellement en cours · Weekly : dernière semaine terminée, comparée à la précédente.</p>
+            <p class="news-meta">Tri par RSI weekly décroissant · RSI 14 · Daily : dernière séance disponible, éventuellement en cours · Weekly : dernière semaine terminée, comparée à la précédente. Divergences : daily sur 7 jours, weekly sur la dernière bougie, éventuellement en cours.</p>
             <table class="etf-table">
-                <thead><tr><th>ETF / Secteur</th><th>Daily</th><th>RSI daily</th><th>Weekly</th><th>RSI weekly</th><th>État</th></tr></thead>
+                <thead><tr><th>ETF / Secteur</th><th>Divergence</th><th>Daily</th><th>RSI daily</th><th>Weekly</th><th>RSI weekly</th><th>État</th></tr></thead>
                 <tbody>
                 {{range .ETFOverview}}
                 <tr>
                     <td><strong title="{{.Name}}">{{.Ticker}}</strong> · {{.Sector}}{{if .Examples}}<span class="barometer-detail"><a href="{{.ExamplesURL}}" style="color:inherit">{{.Examples}}</a></span>{{end}}</td>
+                    <td>{{range .Divergences}}<div class="{{.Class}}"><strong>{{.Period}} · {{.Kind}} RSI</strong><span class="barometer-detail">{{.Dates}}</span></div>{{else}}<span class="neutral">—</span>{{end}}</td>
                     <td><strong class="{{.Daily.ChangeClass}}">{{.Daily.Change}}</strong>{{if .Daily.Date}}<span class="barometer-detail">{{.Daily.Date}}</span>{{end}}</td>
                     <td><span class="{{.Daily.RSIClass}}">{{.Daily.RSI}}</span></td>
                     <td><strong class="{{.Weekly.ChangeClass}}">{{.Weekly.Change}}</strong>{{if .Weekly.Date}}<span class="barometer-detail">{{.Weekly.Date}}</span>{{end}}</td>

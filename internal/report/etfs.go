@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"stock-portfolio/internal/chartcalc"
+	"stock-portfolio/internal/divergencealerts"
 	"stock-portfolio/internal/models"
 )
 
@@ -32,7 +33,10 @@ type ETFRowData struct {
 	Examples, ExamplesURL string
 	Daily, Weekly         ETFPeriodData
 	State, StateClass     string
+	Divergences           []ETFDivergence
 }
+
+type ETFDivergence struct{ Period, Kind, Class, Dates string }
 
 // BuildETFOverview includes the configured ETFs category, even outside the
 // portfolio and without alerts. Ranking uses the last completed weekly RSI.
@@ -48,6 +52,23 @@ func BuildETFOverview(stocks []models.Stock, series map[string]ETFSeries, now ti
 		s := series[stock.Ticker]
 		weekly := completedETFWeeks(s, now)
 		row := ETFRowData{Ticker: stock.Ticker, Name: stock.Name, Sector: etfSector(stock), Daily: etfPeriod(s.Daily, now, 7), Weekly: etfPeriod(weekly, now, 14)}
+		addDivergences := func(period string, alerts []divergencealerts.Alert) {
+			for _, alert := range alerts {
+				class := "negative"
+				if alert.Divergence.Kind == "bullish" {
+					class = "positive"
+				}
+				row.Divergences = append(row.Divergences, ETFDivergence{Period: period, Kind: strings.ToUpper(alert.Divergence.Kind), Class: class, Dates: time.Unix(alert.Divergence.FromTime, 0).UTC().Format("02/01") + " → " + time.Unix(alert.Divergence.ToTime, 0).UTC().Format("02/01")})
+			}
+		}
+		if row.Daily.rsi != nil && validETFDivergenceCandles(s.Daily) {
+			addDivergences("D", divergencealerts.RecentDailyCandles(stock, s.Daily, now))
+		}
+		// Divergence uses the latest weekly candle, which may be in progress;
+		// performance and RSI above intentionally use completed weeks only.
+		if etfPeriod(s.Weekly, now, 14).rsi != nil && validETFDivergenceCandles(s.Weekly) {
+			addDivergences("W", divergencealerts.CheckCandles(stock, s.Weekly))
+		}
 		row.Examples, row.ExamplesURL = etfSectorExamples(stock.Ticker)
 		if row.Weekly.Date != "" {
 			loc, err := time.LoadLocation(s.WeeklyTimezone)
@@ -74,6 +95,15 @@ func BuildETFOverview(stocks []models.Stock, series map[string]ETFSeries, now ti
 		return rows[i].Ticker < rows[j].Ticker
 	})
 	return rows
+}
+
+func validETFDivergenceCandles(c []chartcalc.Candle) bool {
+	for _, b := range c {
+		if math.IsNaN(b.High) || math.IsNaN(b.Low) || math.IsInf(b.High, 0) || math.IsInf(b.Low, 0) || b.Low <= 0 || b.High < b.Close || b.Low > b.Close {
+			return false
+		}
+	}
+	return true
 }
 
 func etfSector(stock models.Stock) string {

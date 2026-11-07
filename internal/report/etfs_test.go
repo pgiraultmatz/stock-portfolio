@@ -150,6 +150,7 @@ func TestETFOverviewSelectionOrderingAndTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.ShowPositions = false
+	rows[0].Divergences = []ETFDivergence{{Period: "D", Kind: "BEARISH", Class: "negative", Dates: "22/10 → 05/11"}, {Period: "W", Kind: "BULLISH", Class: "positive", Dates: "01/10 → 02/11"}}
 	g.ETFOverview = rows
 	content, err := g.GenerateWithAI(nil, nil, "", nil, nil, &news.Digest{}, &news.Digest{})
 	if err != nil {
@@ -163,6 +164,11 @@ func TestETFOverviewSelectionOrderingAndTemplate(t *testing.T) {
 	for _, text := range []string{"Rotation sectorielle", "RSI daily", "RSI weekly", "État", "Sem. du 26/10", "Low &lt;ETF&gt;", "Indisponible"} {
 		if !strings.Contains(content[start:end], text) {
 			t.Errorf("missing %q", text)
+		}
+	}
+	for _, text := range []string{`<th>Divergence</th>`, `class="negative"><strong>D · BEARISH RSI`, `class="positive"><strong>W · BULLISH RSI`, `22/10 → 05/11`, `<span class="neutral">—</span>`} {
+		if !strings.Contains(content[start:end], text) {
+			t.Errorf("missing divergence display %q", text)
 		}
 	}
 	if strings.Contains(content[start:end], "EMA") {
