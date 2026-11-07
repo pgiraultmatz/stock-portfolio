@@ -105,12 +105,15 @@ func writeHeader(sb *strings.Builder) {
   h3 { margin-top: 26px; margin-bottom: 10px; color: #24303d; }
   .cat-count { color:#777; font-size:12px; font-weight: normal; }
   table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
-  .signal-table { table-layout: fixed; }
+  .signal-table { table-layout: fixed; border:1px solid #e4e9ed; box-shadow:0 1px 3px rgba(36,48,67,0.05); }
+  .signal-table th { background:#f0f3f6; color:#637184; font-size:11px; letter-spacing:0.3px; }
+  .signal-table td { padding:13px 12px; border-bottom:1px solid #edf0f3; line-height:1.5; }
   th { background: #17202a; color: white; padding: 10px 12px; text-align: left; font-size: 13px; }
   td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: top; overflow-wrap: anywhere; word-break: normal; }
   tr:last-child td { border-bottom: none; }
-  .stock-col { width: 34%; }
-  .period-col { width: 33%; }
+  .stock-col { width: 30%; }
+  .divergence-col { width: 34%; }
+  .period-col { width: 18%; }
   .single-stock-col { width: 36%; }
   .single-signals-col { width: 64%; }
   .ticker { font-weight: bold; white-space: nowrap; }
@@ -130,7 +133,7 @@ func writeHeader(sb *strings.Builder) {
   .financial-table td { font-size: 12px; line-height: 1.6; }
   .top-picks th, .top-picks td { width: 50%; overflow-wrap: anywhere; }
   .pick-action { display: block; font-weight: bold; margin: 4px 0; }
-  .reversal-picks { background: white; padding: 12px 16px; border-left: 3px solid #d79a20; border-radius: 4px; font-size: 14px; }
+  .reversal-picks { background: transparent; padding: 0; font-size: 14px; }
   .pick-reasons { font-size: 12px; margin: 4px 0 10px; padding-left: 16px; }
   @media (max-width: 600px) { body { padding: 12px; } .top-picks th, .top-picks td { padding: 8px; } }
 </style>
@@ -399,20 +402,22 @@ func writeCategorySection(sb *strings.Builder, category categoryGroup) {
 
 func writeCategorySectionMulti(sb *strings.Builder, category multiCategoryGroup) {
 	sb.WriteString(fmt.Sprintf("<h3>%s <span class=\"cat-count\">%d tickers</span></h3>\n", category.Name, len(category.Tickers)))
-	sb.WriteString("<table class=\"signal-table\">\n")
-	sb.WriteString("  <tr><th class=\"stock-col\">Stock</th><th class=\"period-col\">Daily</th><th class=\"period-col\">Weekly</th></tr>\n")
+	sb.WriteString("<table class=\"signal-table\" style=\"table-layout:fixed;border:1px solid #e4e9ed;background:#fff;border-radius:8px\">\n")
+	sb.WriteString("  <tr><th class=\"stock-col\" style=\"background:#f0f3f6;color:#637184;font-size:11px\">Stock</th><th class=\"divergence-col\" style=\"background:#f0f3f6;color:#637184;font-size:11px\">Divergence</th><th class=\"period-col\" style=\"background:#f0f3f6;color:#637184;font-size:11px\">Daily</th><th class=\"period-col\" style=\"background:#f0f3f6;color:#637184;font-size:11px\">Weekly</th></tr>\n")
 	for _, group := range category.Tickers {
 		daily := formatPeriodCell(group.DailyChange, group.HasDailyChange, group.Daily)
 		weekly := formatPeriodCell(group.WeeklyChange, group.HasWeeklyChange, group.Weekly)
 		sb.WriteString(fmt.Sprintf(
 			`  <tr>
-    <td class="stock-col"><span class="ticker">%s</span> <span class="muted">- %s</span></td>
-    <td class="period-col">%s</td>
-    <td class="period-col">%s</td>
+    <td class="stock-col" style="padding:13px 12px;border-bottom:1px solid #edf0f3"><span class="ticker" style="color:#243043;font-size:14px">%s</span><div class="muted" style="color:#758190;font-size:12px;margin-top:3px">%s</div></td>
+    <td class="divergence-col" style="padding:13px 12px;border-bottom:1px solid #edf0f3;font-size:12px;line-height:1.5">%s</td>
+    <td class="period-col" style="padding:13px 12px;border-bottom:1px solid #edf0f3;line-height:1.5">%s</td>
+    <td class="period-col" style="padding:13px 12px;border-bottom:1px solid #edf0f3;line-height:1.5">%s</td>
   </tr>
 `,
 			group.Ticker,
 			group.Name,
+			formatDivergenceCell(group.Daily, group.Weekly),
 			daily,
 			weekly,
 		))
@@ -421,7 +426,27 @@ func writeCategorySectionMulti(sb *strings.Builder, category multiCategoryGroup)
 }
 
 func formatPeriodCell(change float64, hasChange bool, signals timeframeSignals) string {
-	return formatChange(change, hasChange) + `<br>` + formatTimeframeSignals(signals)
+	return formatChange(change, hasChange) + `<div style="margin-top:5px;font-size:11px;line-height:1.5">` + formatSignals(tickerGroup{Technical: signals.Technical}) + `</div>`
+}
+
+func formatDivergenceCell(daily, weekly timeframeSignals) string {
+	var lines []string
+	for _, p := range []struct {
+		label   string
+		signals timeframeSignals
+	}{{"D", daily}, {"W", weekly}} {
+		for _, alert := range p.signals.Divergences {
+			color, background := "#b54445", "#fff4f3"
+			if alert.Divergence.Kind == "bullish" {
+				color, background = "#26754d", "#e8f5ed"
+			}
+			lines = append(lines, fmt.Sprintf(`<div style="color:%s;background:%s;padding:6px 8px;border-radius:5px;margin-bottom:5px">%s · %s</div>`, color, background, p.label, formatSignals(tickerGroup{Divergences: []divergencealerts.Alert{alert}})))
+		}
+	}
+	if len(lines) == 0 {
+		return `<span class="empty">—</span>`
+	}
+	return strings.Join(lines, "")
 }
 
 func formatTimeframeSignals(signals timeframeSignals) string {

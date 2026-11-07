@@ -61,3 +61,20 @@ func TestFetchCandlesUsesWeeklyQuery(t *testing.T) {
 func testYahooConfig(baseURL string) config.YahooAPIConfig {
 	return config.YahooAPIConfig{BaseURL: baseURL}
 }
+
+func TestRecentDailyDivergenceExpiryAndInvalidation(t *testing.T) {
+	now := time.Date(2026, 11, 7, 15, 0, 0, 0, time.UTC)
+	div := chartcalc.Divergence{Kind: "bearish", ToTime: now.Add(-48 * time.Hour).Unix(), ToPrice: 100}
+	candles := []chartcalc.Candle{{Time: div.ToTime, Close: 99}, {Time: now.Add(-time.Hour).Unix(), Close: 100}}
+	if !recentDailyDivergence(div, candles, now) {
+		t.Fatal("recent divergence should remain visible")
+	}
+	candles = append(candles, chartcalc.Candle{Time: now.Unix(), Close: 102})
+	if recentDailyDivergence(div, candles, now) {
+		t.Fatal("invalidated divergence must disappear")
+	}
+	div.ToTime = now.Add(-8 * 24 * time.Hour).Unix()
+	if recentDailyDivergence(div, nil, now) {
+		t.Fatal("old divergence must expire")
+	}
+}

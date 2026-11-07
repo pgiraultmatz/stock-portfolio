@@ -97,6 +97,15 @@ func (c *Client) Check(ctx context.Context, stock models.Stock, timeframe Timefr
 
 // CheckCandles reuses the shared history instead of fetching a second copy.
 func CheckCandles(stock models.Stock, candles []chartcalc.Candle) []Alert {
+	return checkCandles(stock, candles, time.Time{})
+}
+
+// RecentDailyCandles is used only by the digest; alert delivery stays event-based.
+func RecentDailyCandles(stock models.Stock, candles []chartcalc.Candle, now time.Time) []Alert {
+	return checkCandles(stock, candles, now)
+}
+
+func checkCandles(stock models.Stock, candles []chartcalc.Candle, now time.Time) []Alert {
 	if len(candles) < 40 {
 		return nil
 	}
@@ -121,7 +130,10 @@ func CheckCandles(stock models.Stock, candles []chartcalc.Candle) []Alert {
 	}
 	alerts := make([]Alert, 0, len(divs))
 	for _, div := range divs {
-		if !divergenceOnLatestCandle(div, last.Time) || !divergenceStillActionable(div, last.Close) {
+		if now.IsZero() && (!divergenceOnLatestCandle(div, last.Time) || !divergenceStillActionable(div, last.Close)) {
+			continue
+		}
+		if !now.IsZero() && !recentDailyDivergence(div, candles, now) {
 			continue
 		}
 		alerts = append(alerts, Alert{
@@ -133,6 +145,18 @@ func CheckCandles(stock models.Stock, candles []chartcalc.Candle) []Alert {
 		})
 	}
 	return alerts
+}
+
+func recentDailyDivergence(div chartcalc.Divergence, candles []chartcalc.Candle, now time.Time) bool {
+	if div.ToTime <= 0 || time.Unix(div.ToTime, 0).After(now) || time.Unix(div.ToTime, 0).Before(now.AddDate(0, 0, -7)) || div.ToPrice <= 0 {
+		return false
+	}
+	for _, candle := range candles {
+		if candle.Time >= div.ToTime && !divergenceStillActionable(div, candle.Close) {
+			return false
+		}
+	}
+	return true
 }
 
 func Key(ticker string, timeframe Timeframe, div chartcalc.Divergence) string {

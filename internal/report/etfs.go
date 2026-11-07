@@ -40,7 +40,8 @@ func BuildETFOverview(stocks []models.Stock, series map[string]ETFSeries, now ti
 	var rows []ETFRowData
 	seen := map[string]bool{}
 	for _, stock := range stocks {
-		if !strings.EqualFold(strings.TrimSpace(stock.Category), "ETFs") || seen[stock.Ticker] {
+		category := strings.TrimSpace(stock.Category)
+		if !(strings.EqualFold(category, "ETFs") || strings.EqualFold(category, "ETFs / ETCs")) || seen[stock.Ticker] {
 			continue
 		}
 		seen[stock.Ticker] = true

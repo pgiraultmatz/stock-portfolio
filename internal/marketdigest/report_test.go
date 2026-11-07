@@ -131,7 +131,27 @@ func TestGenerateMultiTimeframeReportUsesDailyAndWeeklyColumns(t *testing.T) {
 			t.Fatalf("expected report to contain column class %q", expected)
 		}
 	}
-	if got := strings.Count(html, `<span class="ticker">MSFT</span>`); got != 1 {
+	if got := strings.Count(html, `<span class="ticker" style="color:#243043;font-size:14px">MSFT</span>`); got != 1 {
 		t.Fatalf("expected one ticker row for multi-timeframe grouped signals, got %d", got)
+	}
+}
+
+func TestDigestDivergencesInColumnAndCards(t *testing.T) {
+	stock := models.Stock{Ticker: "TEST", Name: "Example", Category: "Test"}
+	div := func(kind string) divergencealerts.Alert {
+		return divergencealerts.Alert{Stock: stock, Divergence: chartcalc.Divergence{Kind: kind, FromTime: 1700000000, ToTime: 1701000000}}
+	}
+	opts := RankingOptions{Stocks: []models.Stock{stock}, Evaluations: map[string]models.Evaluation{"TEST": {Version: models.EvaluationVersion, Eligible: true, QuoteType: "ETF", Signal: "BUY", Score: 5, Warnings: []string{"Provisoire", "Date de résultats inconnue", "WAIT EARNINGS"}}}}
+	result := GenerateMultiTimeframeReportWithChanges([]divergencealerts.Alert{div("bearish")}, nil, []divergencealerts.Alert{div("bullish")}, nil, 1.5, 3, nil, nil, opts)
+	for _, want := range []string{`class="divergence-col" style="background:#f0f3f6;color:#637184;font-size:11px">Divergence`, `style="color:#e74c3c;background:#fff4f3;`, `style="color:#27ae60;background:#e8f5ed;`, "WAIT EARNINGS"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(result, "Provisoire") || strings.Contains(result, "Résultats inconnus") {
+		t.Fatal("unwanted warnings")
+	}
+	if strings.Count(result, "BEARISH RSI divergence") != 2 || strings.Count(result, "BULLISH RSI divergence") != 2 {
+		t.Fatal("divergences should occur once in card and once in divergence column")
 	}
 }

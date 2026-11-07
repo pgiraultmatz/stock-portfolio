@@ -974,7 +974,7 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 	for _, r := range snapshot.Results {
 		ticker := r.Stock.Ticker
 		d, w := snapshot.Daily[ticker].Candles, snapshot.Weekly[ticker].Candles
-		dd = append(dd, divergencealerts.CheckCandles(r.Stock, d)...)
+		dd = append(dd, divergencealerts.RecentDailyCandles(r.Stock, d, options.Now)...)
 		wd = append(wd, divergencealerts.CheckCandles(r.Stock, w)...)
 		dt = append(dt, technicalalerts.CheckCandles(r.Stock, technicalalerts.Daily, d, emaThreshold)...)
 		wt = append(wt, technicalalerts.CheckCandles(r.Stock, technicalalerts.Weekly, w, weeklyEMAThreshold)...)

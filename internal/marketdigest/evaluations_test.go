@@ -126,7 +126,7 @@ func TestCompactCardsKeepEarningsWithoutRepeatedAction(t *testing.T) {
 			t.Errorf("unexpected content: %s", removed)
 		}
 	}
-	if strings.Count(content, "WAIT EARNINGS") != 1 || !strings.Contains(content, "Provisoire") || !strings.Contains(content, "&lt;unsafe&gt;") {
+	if strings.Count(content, "WAIT EARNINGS") != 1 || strings.Contains(content, "Provisoire") || !strings.Contains(content, "&lt;unsafe&gt;") {
 		t.Fatal("warnings duplicated, lost or unescaped")
 	}
 }

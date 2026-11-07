@@ -12,13 +12,14 @@ import (
 )
 
 type RankingOptions struct {
-	Previous     *SectionHistory
-	Evaluations  map[string]models.Evaluation
-	Stocks       []models.Stock
-	Limit        int
-	Now          time.Time
-	Financials   map[string]FinancialContext
-	FinancialsAt time.Time
+	DigestSignals map[string]multiTickerGroup
+	Previous      *SectionHistory
+	Evaluations   map[string]models.Evaluation
+	Stocks        []models.Stock
+	Limit         int
+	Now           time.Time
+	Financials    map[string]FinancialContext
+	FinancialsAt  time.Time
 }
 
 func rankingOptions(options []RankingOptions) RankingOptions {
@@ -207,6 +208,10 @@ func writeTopSection(sb *strings.Builder, groups []tickerGroup, timeframe string
 
 func writeTopSectionMulti(sb *strings.Builder, groups []multiTickerGroup, options RankingOptions) {
 	if options.Evaluations != nil {
+		options.DigestSignals = map[string]multiTickerGroup{}
+		for _, group := range groups {
+			options.DigestSignals[group.Ticker] = group
+		}
 		writeEvaluationTopSection(sb, options)
 		return
 	}
