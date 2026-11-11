@@ -12,6 +12,7 @@ import (
 )
 
 type RankingOptions struct {
+	Changes       map[string]ChangeSummary
 	DigestSignals map[string]multiTickerGroup
 	Previous      *SectionHistory
 	Evaluations   map[string]models.Evaluation

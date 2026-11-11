@@ -69,7 +69,7 @@ func TestNovemberPullbackEntriesAndRankChanges(t *testing.T) {
 			}
 		})
 	}
-	if strings.Contains(content, "NOUVEAU") || !strings.Contains(content, "display:inline-block;max-width:100%") {
+	if strings.Contains(content, "NOUVEAU") || !strings.Contains(content, "width:100%;box-sizing:border-box") {
 		t.Fatal("highlights must remain compact and without a new-entry label")
 	}
 }

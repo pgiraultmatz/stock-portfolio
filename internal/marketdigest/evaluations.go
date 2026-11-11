@@ -11,6 +11,7 @@ import (
 )
 
 type evaluationPick struct {
+	changes      ChangeSummary
 	signals      multiTickerGroup
 	stock        models.Stock
 	evaluation   models.Evaluation
@@ -118,6 +119,7 @@ func writeEvaluationTopSection(sb *strings.Builder, options RankingOptions) {
 	attach := func(picks []evaluationPick) []evaluationPick {
 		for i := range picks {
 			picks[i].signals = options.DigestSignals[picks[i].stock.Ticker]
+			picks[i].changes = options.Changes[picks[i].stock.Ticker]
 		}
 		return picks
 	}
@@ -160,17 +162,18 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 			color, accent = "#986b1e", "#d9a442"
 		}
 		sb.WriteString(`<li style="margin:0 0 9px">`)
+		cardBackground, cardBorder := "#ffffff", "#e4e9ed"
+		cardClass := "digest-card"
 		if p.isNew {
-			background, border := "#fdf6e7", "#e8ce91"
+			cardClass = "new-entry"
+			cardBackground, cardBorder = "#fdf6e7", "#e8ce91"
 			if class == "bullish" {
-				background, border = "#edf7ef", "#b7d9bf"
+				cardBackground, cardBorder = "#edf7ef", "#b7d9bf"
 			} else if class == "bearish" {
-				background, border = "#fdf0ef", "#ebbfbb"
+				cardBackground, cardBorder = "#fdf0ef", "#ebbfbb"
 			}
-			// Inline styles survive email clients which discard stylesheet classes.
-			fmt.Fprintf(sb, `<div class="new-entry" style="display:inline-block;max-width:100%%;box-sizing:border-box;vertical-align:top;background-color:%s;border:1px solid %s;border-radius:6px;padding:3px">`, background, border)
 		}
-		fmt.Fprintf(sb, `<div class="digest-card" style="background:#ffffff;border:1px solid #e4e9ed;border-left:3px solid %s;border-radius:7px;padding:12px;margin:0"><table role="presentation" style="width:100%%;border-collapse:collapse;background:transparent;box-shadow:none"><tr><td style="padding:0;border:0;vertical-align:top"><strong class="%s" style="color:%s;font-size:15px">%s — %s`, accent, class, color, html.EscapeString(p.stock.Ticker), html.EscapeString(e.Signal))
+		fmt.Fprintf(sb, `<div class="%s" style="width:100%%;box-sizing:border-box;background:%s;background-color:%s;border:1px solid %s;border-left:3px solid %s;border-radius:7px;padding:12px;margin:0"><table role="presentation" style="width:100%%;border-collapse:collapse;background:transparent;box-shadow:none"><tr><td style="width:70%%;padding:0;border:0;vertical-align:top"><strong class="%s" style="color:%s;font-size:15px">%s — %s`, cardClass, cardBackground, cardBackground, cardBorder, accent, class, color, html.EscapeString(p.stock.Ticker), html.EscapeString(e.Signal))
 		if rank := i + 1; p.previousRank > 0 && p.previousRank != rank {
 			arrow, places := "▲", p.previousRank-rank
 			if places < 0 {
@@ -179,7 +182,7 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 			// Inherit the ticker/signal color in every section, including email clients.
 			fmt.Fprintf(sb, ` <span class="rank-change" title="Rang %d → %d" aria-label="Rang %d → %d" style="display:inline-block;white-space:nowrap;font-size:12px;color:inherit">%s %d</span>`, p.previousRank, rank, p.previousRank, rank, arrow, places)
 		}
-		fmt.Fprintf(sb, `</strong></td><td style="padding:0;border:0;text-align:right;vertical-align:top;white-space:nowrap;color:%s;font-weight:bold;font-size:14px">%+.1f <span style="font-size:10px;color:#8a96a3;font-weight:normal">SCORE</span></td></tr></table><div class="muted" style="font-size:12px;color:#758190;margin:6px 0">%s`, color, e.Score, html.EscapeString(p.stock.Name))
+		fmt.Fprintf(sb, `</strong></td><td style="width:30%%;padding:0;border:0;text-align:right;vertical-align:top;white-space:nowrap;color:%s;font-weight:bold;font-size:14px">%+.1f <span style="font-size:10px;color:#8a96a3;font-weight:normal">SCORE</span></td></tr></table><div class="muted" style="font-size:12px;color:#758190;margin:6px 0">%s`, color, e.Score, html.EscapeString(p.stock.Name))
 		if category := strings.TrimSpace(p.stock.Category); category != "" {
 			fmt.Fprintf(sb, ` <span class="muted">· %s</span>`, html.EscapeString(category))
 		}
@@ -187,6 +190,19 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 			sb.WriteString(` <span class="muted">ETF</span>`)
 		}
 		sb.WriteString(`</div>`)
+		formatCardChange := func(v float64, ok bool) string {
+			if !ok {
+				return `<span style="color:#758190">—</span>`
+			}
+			c := "#758190"
+			if v > 0 {
+				c = "#26754d"
+			} else if v < 0 {
+				c = "#b54445"
+			}
+			return fmt.Sprintf(`<span style="color:%s">%+.2f%%</span>`, c, v)
+		}
+		fmt.Fprintf(sb, `<div style="font-size:12px;color:#758190;margin:6px 0">D %s · W %s</div>`, formatCardChange(p.changes.DailyChange, p.changes.HasDailyChange), formatCardChange(p.changes.WeeklyChange, p.changes.HasWeeklyChange))
 		for _, warning := range e.Warnings {
 			if warning == "WAIT EARNINGS" {
 				sb.WriteString(`<div class="pick-action"><span class="earnings-warning" style="display:inline-block;background:#fff0bd;color:#783c00;border:1px solid #d79a20;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:bold">WAIT EARNINGS`)
@@ -234,9 +250,6 @@ func writeEvaluationList(sb *strings.Builder, picks []evaluationPick, buy bool) 
 			fmt.Fprintf(sb, `<div class="muted">%s</div>`, html.EscapeString(strings.Join(warnings, " · ")))
 		}
 		sb.WriteString("</div>")
-		if p.isNew {
-			sb.WriteString("</div>")
-		}
 		sb.WriteString("</li>")
 	}
 	sb.WriteString("</ol>")

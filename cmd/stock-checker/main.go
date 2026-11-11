@@ -970,7 +970,7 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 	var dd, wd []divergencealerts.Alert
 	var dt, wt []technicalalerts.Alert
 	changes := map[string]marketdigest.ChangeSummary{}
-	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now(), Stocks: cfg.Stocks, Evaluations: map[string]models.Evaluation{}, Previous: previous}
+	options := marketdigest.RankingOptions{Limit: topCount, Now: time.Now(), Stocks: cfg.Stocks, Evaluations: map[string]models.Evaluation{}, Previous: previous, Changes: changes}
 	for _, r := range snapshot.Results {
 		ticker := r.Stock.Ticker
 		d, w := snapshot.Daily[ticker].Candles, snapshot.Weekly[ticker].Candles
@@ -980,16 +980,7 @@ func runMarketDigest(ctx context.Context, cfg *config.Config, outputPath string,
 		wt = append(wt, technicalalerts.CheckCandles(r.Stock, technicalalerts.Weekly, w, weeklyEMAThreshold)...)
 		e := r.Evaluation
 		options.Evaluations[ticker] = *e
-		c := marketdigest.ChangeSummary{}
-		if e.DailyChange != nil {
-			c.DailyChange = *e.DailyChange
-			c.HasDailyChange = true
-		}
-		if e.WeeklyChange != nil {
-			c.WeeklyChange = *e.WeeklyChange
-			c.HasWeeklyChange = true
-		}
-		changes[ticker] = c
+		changes[ticker] = marketdigest.RollingChanges(d, snapshot.Daily[ticker].Timezone, options.Now)
 	}
 	var html string
 	if timeframeValue == "both" {
